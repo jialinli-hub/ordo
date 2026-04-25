@@ -1,0 +1,17 @@
+.layout {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+section {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px;
+}

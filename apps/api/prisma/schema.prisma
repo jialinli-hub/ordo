@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String               @id @default(cuid())
+  name      String
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  projects  Project[]
+  members   OrganizationMember[]
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  key            String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cycles         Cycle[]
+  issues         Issue[]
+  members        ProjectMember[]
+  issueCounter   ProjectIssueCounter?
+
+  @@unique([organizationId, key])
+}
+
+model Cycle {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String
+  name           String
+  startsAt       DateTime
+  endsAt         DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Issue {
+  id             String         @id @default(cuid())
+  organizationId String
+  projectId      String
+  cycleId        String?
+  title          String
+  description    String?
+  status         String         @default("todo")
+  priority       Int            @default(0)
+  issueNumber    Int
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comments       IssueComment[]
+
+  @@unique([projectId, issueNumber])
+  @@index([organizationId, status])
+}
+
+model IssueComment {
+  id             String   @id @default(cuid())
+  organizationId String
+  issueId        String
+  body           String
+  createdAt      DateTime @default(now())
+  issue          Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, issueId])
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String       @default("member")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, role])
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId, role])
+}
+
+model ProjectIssueCounter {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  current   Int      @default(0)
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}

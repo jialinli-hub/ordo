@@ -1,0 +1,30 @@
+{
+  "name": "ordo-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ordo API service",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "build": "echo \"api build skipped (plain node)\"",
+    "test": "node --test",
+    "lint": "node --check src/app.js && node --check src/server.js",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.6.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "prisma": "^6.6.0",
+    "supertest": "^7.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
