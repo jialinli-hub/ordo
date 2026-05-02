@@ -15,6 +15,7 @@ async function queryIssues({
 
   const where = {
     ...baseWhere,
+    parentIssueId: null,
     ...(status ? { status } : {}),
     ...(teamId ? { teamId } : {})
   };
@@ -44,7 +45,9 @@ async function queryIssues({
 
 async function boardIssuesByStatus(organizationId, workspaceId = null) {
   const baseWhere =
-    workspaceId == null ? { organizationId } : buildIssueAccessWhere(organizationId, workspaceId);
+    workspaceId == null
+      ? { organizationId, parentIssueId: null }
+      : { ...buildIssueAccessWhere(organizationId, workspaceId), parentIssueId: null };
 
   const rows = await prisma.issue.findMany({ where: baseWhere, orderBy: { updatedAt: "desc" } });
 

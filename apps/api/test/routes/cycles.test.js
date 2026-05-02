@@ -131,6 +131,12 @@ test("GET /api/cycles should include per-cycle summary stats", async () => {
   assert.equal(item.summary.inReviewIssues, 0);
   assert.equal(item.summary.completionRate, 33.33);
   assert.equal(item.summary.scopeCount, 3);
+  assert.deepEqual(item.summary.byStatus, { todo: 1, in_progress: 1, in_review: 0, done: 1 });
+  assert.equal(item.summary.byType.feature, 3);
+  assert.equal(item.summary.estimateHoursTotal, 10);
+  assert.equal(item.summary.estimateHoursDone, 5);
+  assert.equal(item.summary.estimateHoursRemaining, 5);
+  assert.equal(item.summary.estimateUnset, 0);
 });
 
 test("POST /api/cycles should allow creating cycle for current team without project selection", async () => {

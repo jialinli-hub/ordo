@@ -18,9 +18,10 @@ test("project should support create read update delete", async () => {
   const createRes = await request(app)
     .post("/api/projects")
     .set(auth)
-    .send({ name: "Core Platform", key: "CORE" });
+    .send({ name: "Core Platform" });
   assert.equal(createRes.statusCode, 201);
   assert.equal(createRes.body.name, "Core Platform");
+  assert.equal(createRes.body.key, undefined);
   const projectId = createRes.body.id;
 
   const listRes = await request(app).get("/api/projects").set(auth);
@@ -34,10 +35,10 @@ test("project should support create read update delete", async () => {
   const updateRes = await request(app)
     .patch(`/api/projects/${projectId}`)
     .set(auth)
-    .send({ name: "Core Platform V2", key: "CORE2" });
+    .send({ name: "Core Platform V2" });
   assert.equal(updateRes.statusCode, 200);
   assert.equal(updateRes.body.name, "Core Platform V2");
-  assert.equal(updateRes.body.key, "CORE2");
+  assert.equal(updateRes.body.key, undefined);
 
   const deleteRes = await request(app).delete(`/api/projects/${projectId}`).set(auth);
   assert.equal(deleteRes.statusCode, 200);
@@ -47,7 +48,7 @@ test("project should support create read update delete", async () => {
   assert.equal(readAfterDeleteRes.statusCode, 404);
 });
 
-test("project key uniqueness should be scoped by workspace", async () => {
+test("same project name can exist in different workspaces (internal key is auto)", async () => {
   const auth = {
     Authorization: "Bearer dev-dingtalk:owner@example.com",
     "x-organization-id": "org-project-scope"
@@ -67,18 +68,18 @@ test("project key uniqueness should be scoped by workspace", async () => {
   const firstCreateRes = await request(app)
     .post("/api/projects")
     .set({ ...auth, "x-workspace-id": firstWorkspaceId })
-    .send({ name: "Core A", key: "CORE" });
+    .send({ name: "Project Alpha" });
   assert.equal(firstCreateRes.statusCode, 201);
 
-  const duplicateSameWorkspaceRes = await request(app)
+  const duplicateNameSameWorkspaceRes = await request(app)
     .post("/api/projects")
     .set({ ...auth, "x-workspace-id": firstWorkspaceId })
-    .send({ name: "Core A2", key: "CORE" });
-  assert.equal(duplicateSameWorkspaceRes.statusCode, 409);
+    .send({ name: "Project Alpha" });
+  assert.equal(duplicateNameSameWorkspaceRes.statusCode, 201);
 
-  const sameKeyOtherWorkspaceRes = await request(app)
+  const otherWorkspaceRes = await request(app)
     .post("/api/projects")
     .set({ ...auth, "x-workspace-id": secondWorkspaceId })
-    .send({ name: "Core B", key: "CORE" });
-  assert.equal(sameKeyOtherWorkspaceRes.statusCode, 201);
+    .send({ name: "Project Alpha" });
+  assert.equal(otherWorkspaceRes.statusCode, 201);
 });

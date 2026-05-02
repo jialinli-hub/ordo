@@ -14,7 +14,6 @@ import {
   TextArea,
   ToggleSwitch
 } from "../../ui/primitives.jsx";
-import { IssueMarkdown } from "./IssueMarkdown.jsx";
 import { PRIORITY_META, STATUS_META, TYPE_LABEL, issueDisplayRef, typeTagClass } from "./issueUi";
 
 dayjs.extend(relativeTime);
@@ -38,6 +37,27 @@ function navigateTo(path) {
   }
   window.history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+/** 子任务列表工时合计展示（只对有限数字累加） */
+function formatSubtaskHoursTotal(sum) {
+  if (!Number.isFinite(sum)) {
+    return "—";
+  }
+  const n = Number(sum.toFixed(2));
+  return String(n);
+}
+
+/** 单条任务的预估工时展示 */
+function formatEstimateHoursCell(h) {
+  if (h == null || h === "") {
+    return "—";
+  }
+  const n = Number(h);
+  if (!Number.isFinite(n)) {
+    return "—";
+  }
+  return String(Number(n.toFixed(2)));
 }
 
 export function IssueDetail(props) {
@@ -68,6 +88,9 @@ export function IssueDetail(props) {
   const [labelJoined, setLabelJoined] = createSignal("");
   const [estimateDraft, setEstimateDraft] = createSignal("");
   const [descFontPx, setDescFontPx] = createSignal(13);
+  const [cycleEpics, setCycleEpics] = createSignal([]);
+  const [subtaskTitle, setSubtaskTitle] = createSignal("");
+  const [commentSending, setCommentSending] = createSignal(false);
 
   const teamPathSeg = () => teamSegmentForUrl({ name: teamName(), id: teamId() });
 
@@ -98,6 +121,30 @@ export function IssueDetail(props) {
 
   createEffect(() => {
     const i = issue();
+    const cid = i?.cycleId;
+    if (!cid) {
+      setCycleEpics([]);
+      return;
+    }
+    let alive = true;
+    apiGet(`/api/cycles/${encodeURIComponent(cid)}/epics`)
+      .then((d) => {
+        if (alive) {
+          setCycleEpics(d.items ?? []);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setCycleEpics([]);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  });
+
+  createEffect(() => {
+    const i = issue();
     const key = routeIssueKey();
     if (loading() || !i || !i.issues_id || key !== i.id) {
       return;
@@ -121,6 +168,18 @@ export function IssueDetail(props) {
     const i = issue();
     return i ? issueDisplayRef(i, project()) : routeIssueKey();
   };
+
+  const subtasksHeadSummary = createMemo(() => {
+    const list = issue()?.subtasks ?? [];
+    let sum = 0;
+    for (const st of list) {
+      const h = st?.estimateHours;
+      if (h != null && Number.isFinite(Number(h))) {
+        sum += Number(h);
+      }
+    }
+    return { count: list.length, hoursSum: sum };
+  });
 
   function memberName(userId) {
     if (!userId) {
@@ -164,12 +223,57 @@ export function IssueDetail(props) {
     if (!body) {
       return;
     }
+    setCommentSending(true);
+    setDetailError("");
     try {
-      await apiPost(`/api/issues/${encodeURIComponent(issueId())}/comments`, { body });
+      await apiPost(`/api/issues/${encodeURIComponent(routeIssueKey())}/comments`, { body });
       setCommentBody("");
       await reload();
     } catch {
       setDetailError("发送评论失败");
+    } finally {
+      setCommentSending(false);
+    }
+  }
+
+  function issueDetailHref(refSegment) {
+    return withWorkspacePrefix(
+      `/workspace/teams/${teamPathSeg()}/issues/${encodeURIComponent(refSegment)}`
+    );
+  }
+
+  async function addSubtask() {
+    const t = subtaskTitle().trim();
+    const parentRow = issue();
+    if (!t || !parentRow?.id) {
+      return;
+    }
+    setDetailError("");
+    try {
+      await apiPost("/api/issues", { parentIssueId: parentRow.id, title: t });
+      setSubtaskTitle("");
+      await reload();
+    } catch {
+      setDetailError("创建子任务失败");
+    }
+  }
+
+  async function patchSubtask(subId, partial) {
+    setDetailError("");
+    try {
+      const updated = await apiPatch(`/api/issues/${encodeURIComponent(subId)}`, partial);
+      setIssue((prev) => {
+        if (!prev?.subtasks?.length) {
+          return prev;
+        }
+        return {
+          ...prev,
+          subtasks: prev.subtasks.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
+        };
+      });
+      props.onIssueUpdated?.(updated);
+    } catch {
+      setDetailError("更新子任务失败");
     }
   }
 
@@ -204,10 +308,12 @@ export function IssueDetail(props) {
         <Show when={!detailError() && !issue()}>
           <p class="muted">未找到任务。</p>
         </Show>
-        <Show when={issue()} keyed>
-        {(iss) => {
-          const activity = [...(iss.activity || [])].sort(
-            (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+        <Show when={issue()}>
+        {(issueAcc) => {
+          const activity = createMemo(() =>
+            [...(issueAcc()?.activity || [])].sort(
+              (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+            )
           );
 
           return (
@@ -233,6 +339,27 @@ export function IssueDetail(props) {
                 </div>
               </header>
 
+              <Show when={issueAcc()?.parent}>
+                <div class="issue-detail-parent-bar muted">
+                  <span class="issue-detail-parent-label">父任务</span>
+                  <Btn
+                    variant="link"
+                    type="button"
+                    class="issue-detail-parent-link"
+                    onClick={() => {
+                      const p = issueAcc()?.parent;
+                      if (p)
+                        navigateTo(issueDetailHref(p.issues_id || p.id));
+                    }}
+                  >
+                    {(() => {
+                      const p = issueAcc()?.parent;
+                      return (p?.issues_id ? `${p.issues_id} · ` : "") + (p?.title ?? "");
+                    })()}
+                  </Btn>
+                </div>
+              </Show>
+
               {detailError() ? <p class="error-text issue-detail-soft-error">{detailError()}</p> : null}
 
               <div class="issue-detail-layout">
@@ -240,14 +367,16 @@ export function IssueDetail(props) {
                   <Inp
                     class="issue-detail-title-input"
                     variant="borderless"
-                    value={iss.title}
+                    aria-label="标题"
+                    placeholder="标题"
+                    value={issueAcc()?.title}
                     onInput={(e) => setIssue((prev) => ({ ...prev, title: e.target.value }))}
                     onBlur={() => patchIssue({ title: issue().title })}
                   />
 
                   <div class="issue-desc-block">
                     <div class="issue-desc-head">
-                      <span class="muted">描述（Markdown）</span>
+                      <span class="muted issue-desc-label">描述</span>
                       <div class="issue-desc-zoom">
                         <Btn variant="text" type="button" aria-label="放大编辑区字体" onClick={() => setDescFontPx((x) => Math.min(22, x + 2))}>
                           A+
@@ -257,26 +386,106 @@ export function IssueDetail(props) {
                         </Btn>
                       </div>
                     </div>
-                    <div class="issue-desc-preview-wrap">
-                      <Show when={iss.description?.trim()} fallback={<p class="muted issue-md-empty">暂无描述预览</p>}>
-                        <IssueMarkdown markdown={iss.description || ""} />
-                      </Show>
-                    </div>
                     <TextArea
                       class="issue-detail-description"
                       variant="borderless"
-                      placeholder="在此编辑 Markdown 源码…"
-                      rows={5}
+                      aria-label="描述"
+                      placeholder="在此输入描述（支持 Markdown），失焦自动保存"
+                      rows={8}
                       style={{ "font-size": `${descFontPx()}px`, "line-height": 1.45 }}
-                      value={iss.description || ""}
+                      value={issueAcc()?.description || ""}
                       onInput={(e) => setIssue((prev) => ({ ...prev, description: e.target.value }))}
                       onBlur={() => patchIssue({ description: issue().description?.trim() || null })}
                     />
                   </div>
 
-                  <div class="issue-detail-subhints muted">
-                    <span>+ 子任务（即将支持）</span>
-                  </div>
+                  <section class="issue-detail-subtasks">
+                    <div class="issue-detail-section-head">
+                      <h3 class="issue-detail-section-title">子任务</h3>
+                      <Show when={subtasksHeadSummary().count > 0}>
+                        <span
+                          class="issue-subtasks-summary muted"
+                          aria-label={`${subtasksHeadSummary().count} 条子任务，工时合计 ${formatSubtaskHoursTotal(subtasksHeadSummary().hoursSum)} 小时`}
+                        >
+                          <span class="issue-subtasks-summary-count">共 {subtasksHeadSummary().count} 条</span>
+                          <span class="issue-subtasks-summary-sep" aria-hidden>
+                            ·
+                          </span>
+                          <span class="issue-subtasks-summary-hours">
+                            工时合计 {formatSubtaskHoursTotal(subtasksHeadSummary().hoursSum)} h
+                          </span>
+                        </span>
+                      </Show>
+                    </div>
+                    <Show when={!issueAcc()?.parentIssueId}>
+                      <div class="issue-subtasks-add">
+                        <Inp
+                          class="issue-subtasks-add-input"
+                          placeholder="新建子任务标题，回车添加"
+                          aria-label="新建子任务标题"
+                          value={subtaskTitle()}
+                          onInput={(e) => setSubtaskTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void addSubtask();
+                            }
+                          }}
+                        />
+                        <Btn type="button" variant="default" onClick={() => void addSubtask()}>
+                          添加
+                        </Btn>
+                      </div>
+                    </Show>
+                    <ul class="issue-subtasks-list">
+                      <For each={issueAcc()?.subtasks ?? []}>
+                        {(st) => (
+                          <li class="issue-subtask-row">
+                            <span
+                              class="issue-status-dot-large"
+                              style={{ background: STATUS_META[st.status]?.dot || "#94a3b8" }}
+                              title={STATUS_META[st.status]?.label}
+                              aria-hidden
+                            />
+                            <button
+                              type="button"
+                              class="issue-subtask-main"
+                              onClick={() =>
+                                navigateTo(issueDetailHref(st.issues_id || st.id))
+                              }
+                            >
+                              <span class="muted issue-subtask-ref">{issueDisplayRef(st, project())}</span>
+                              <span class="issue-subtask-title">{st.title}</span>
+                            </button>
+                            <span
+                              class="issue-subtask-hours muted"
+                              title="预估工时"
+                              aria-label={`预估工时 ${formatEstimateHoursCell(st.estimateHours)} 小时`}
+                            >
+                              {formatEstimateHoursCell(st.estimateHours)} h
+                            </span>
+                            <span
+                              class="issue-subtask-assignee muted"
+                              title={memberName(st.assigneeId)}
+                              aria-label={`负责人 ${memberName(st.assigneeId)}`}
+                            >
+                              {memberName(st.assigneeId)}
+                            </span>
+                            <Sel
+                              class="issue-subtask-status-sel"
+                              aria-label={`子任务状态 ${st.title}`}
+                              value={st.status}
+                              options={STATUS_OPTIONS}
+                              onChange={(v) => void patchSubtask(st.id, { status: v })}
+                            />
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                    <Show when={(issueAcc()?.subtasks ?? []).length === 0}>
+                      <p class="muted issue-subtasks-empty">暂无子任务</p>
+                    </Show>
+                  </section>
 
                   <section class="issue-detail-activity">
                     <div class="issue-detail-section-head">
@@ -287,7 +496,7 @@ export function IssueDetail(props) {
                       </div>
                     </div>
                     <ul class="issue-activity-list">
-                      <For each={activity}>
+                      <For each={activity()}>
                         {(row) => (
                           <li class="issue-activity-row">
                             <span class="issue-assignee-circle sm" aria-hidden>
@@ -297,7 +506,7 @@ export function IssueDetail(props) {
                           </li>
                         )}
                       </For>
-                      {activity.length === 0 ? <li class="muted">暂无动态</li> : null}
+                      {activity().length === 0 ? <li class="muted">暂无动态</li> : null}
                     </ul>
                   </section>
 
@@ -305,22 +514,34 @@ export function IssueDetail(props) {
                     <h3 class="issue-detail-section-title">评论</h3>
                     <div class="issue-comment-compose">
                       <TextArea
-                        placeholder="留下评论…"
+                        placeholder="留下评论…（Ctrl+Enter 发送）"
                         rows={3}
+                        aria-label="评论内容"
                         value={commentBody()}
                         onInput={(e) => setCommentBody(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            void submitComment();
+                          }
+                        }}
                       />
                       <div class="issue-comment-compose-actions">
                         <Btn variant="text" disabled aria-label="附件">
-                          📎
+                          附件
                         </Btn>
-                        <Btn variant="primary" onClick={() => submitComment()}>
-                          ➤ 发送
+                        <Btn
+                          variant="primary"
+                          loading={commentSending()}
+                          disabled={!commentBody().trim()}
+                          onClick={() => void submitComment()}
+                        >
+                          发送
                         </Btn>
                       </div>
                     </div>
                     <ul class="issue-comment-list">
-                      <For each={issue().comments || []}>
+                      <For each={issueAcc()?.comments || []}>
                         {(c) => (
                           <li class="issue-comment-item">
                             <span class="issue-assignee-circle" aria-hidden>
@@ -346,33 +567,37 @@ export function IssueDetail(props) {
                     <div class="issue-prop-row">
                       <span
                         class="issue-status-dot-large"
-                        style={{ background: STATUS_META[iss.status]?.dot || "#94a3b8" }}
+                        style={{ background: STATUS_META[issueAcc()?.status]?.dot || "#94a3b8" }}
                         title="状态"
                       />
                       <Sel
                         class="issue-prop-select"
                         aria-label="状态"
-                        value={iss.status}
+                        value={issueAcc()?.status}
                         options={STATUS_OPTIONS}
                         onChange={(v) => patchIssue({ status: v })}
                       />
                     </div>
                     <div class="issue-prop-row">
-                      <span class="muted">⚡</span>
+                      <span class="issue-prop-kicker" aria-hidden>
+                        P
+                      </span>
                       <Sel
                         class="issue-prop-select"
                         aria-label="优先级"
-                        value={iss.priority}
+                        value={issueAcc()?.priority}
                         options={PRIORITY_OPTIONS}
                         onChange={(raw) => patchIssue({ priority: Number(raw) })}
                       />
                     </div>
                     <div class="issue-prop-row">
-                      <span class="muted">👤</span>
+                      <span class="issue-prop-kicker" aria-hidden>
+                        @
+                      </span>
                       <Sel
                         class="issue-prop-select"
                         aria-label="负责人"
-                        value={iss.assigneeId || ""}
+                        value={issueAcc()?.assigneeId || ""}
                         options={[
                           { value: "", label: "未指派" },
                           ...members().map((m) => ({ value: m.userId, label: m.name }))
@@ -402,29 +627,49 @@ export function IssueDetail(props) {
                       }
                     >
                       <button type="button" class="issue-prop-row-btn">
-                        <span class="muted">⏱</span>
-                        <span>{iss.estimateHours != null ? `${iss.estimateHours} h` : "预估工时"}</span>
+                        <span class="issue-prop-kicker issue-prop-kicker--mono" aria-hidden>
+                          h
+                        </span>
+                        <span>{issueAcc()?.estimateHours != null ? `${issueAcc().estimateHours} h` : "预估工时"}</span>
                       </button>
                     </Popover>
                     <div class="issue-prop-row">
-                      <span class="muted">▶</span>
+                      <span class="issue-prop-kicker" aria-hidden>
+                        ↻
+                      </span>
                       <Sel
                         class="issue-prop-select"
                         aria-label="迭代"
-                        value={iss.cycleId || ""}
+                        value={issueAcc()?.cycleId || ""}
                         options={[
                           { value: "", label: "不关联" },
                           ...cycles().map((c) => ({ value: c.id, label: c.name }))
                         ]}
-                        onChange={(v) => patchIssue({ cycleId: v || null })}
+                        onChange={(v) => patchIssue({ cycleId: v || null, cycleEpicId: null })}
+                      />
+                    </div>
+                    <div class="issue-prop-row">
+                      <span class="issue-prop-kicker" aria-hidden>
+                        ◇
+                      </span>
+                      <Sel
+                        class="issue-prop-select"
+                        aria-label="大需求"
+                        value={issueAcc()?.cycleEpicId || ""}
+                        disabled={!issueAcc()?.cycleId}
+                        options={[
+                          { value: "", label: issueAcc()?.cycleId ? "不关联大需求" : "请先关联迭代" },
+                          ...cycleEpics().map((e) => ({ value: e.id, label: e.name }))
+                        ]}
+                        onChange={(v) => patchIssue({ cycleEpicId: v || null })}
                       />
                     </div>
                   </div>
 
                   <div class="issue-sidebar-section">
-                    <h4 class="issue-sidebar-heading"># 标签</h4>
+                    <h4 class="issue-sidebar-heading">标签</h4>
                     <div class="issue-tags-row">
-                      <For each={iss.labels || []}>{(lb) => <TagSpan class="issue-label-chip">{lb}</TagSpan>}</For>
+                      <For each={issueAcc()?.labels || []}>{(lb) => <TagSpan class="issue-label-chip">{lb}</TagSpan>}</For>
                       <Popover
                         placement="bottom"
                         content={
@@ -449,11 +694,11 @@ export function IssueDetail(props) {
                   </div>
 
                   <div class="issue-sidebar-section">
-                    <h4 class="issue-sidebar-heading">⊞ 项目</h4>
+                    <h4 class="issue-sidebar-heading">项目</h4>
                     <Sel
                       class="issue-project-select"
                       aria-label="项目"
-                      value={iss.projectId}
+                      value={issueAcc()?.projectId}
                       options={projects().map((p) => ({ value: p.id, label: p.name }))}
                       onChange={(v) => patchIssue({ projectId: v })}
                     />
@@ -461,7 +706,7 @@ export function IssueDetail(props) {
 
                   <div class="issue-sidebar-meta muted issue-sidebar-small">
                     类型：
-                    <TagSpan class={typeTagClass(iss.type)}>{TYPE_LABEL[iss.type] || iss.type}</TagSpan>
+                    <TagSpan class={typeTagClass(issueAcc()?.type)}>{TYPE_LABEL[issueAcc()?.type] || issueAcc()?.type}</TagSpan>
                   </div>
                 </aside>
               </div>
@@ -483,7 +728,7 @@ export function IssueDetail(props) {
               >
                 <p>
                   确定删除「
-                  {iss.title}
+                  {issueAcc()?.title}
                   」？此操作不可恢复。
                 </p>
               </Modal>

@@ -10,7 +10,12 @@ function iso(d) {
 
 function mapIssueToApi(
   row,
-  { includeComments = false, includeActivity = false } = {}
+  {
+    includeComments = false,
+    includeActivity = false,
+    includeSubtasks = false,
+    includeParent = false
+  } = {}
 ) {
   if (!row) {
     return null;
@@ -34,11 +39,33 @@ function mapIssueToApi(
       createdAt: iso(a.createdAt)
     })) ?? undefined;
 
+  let subtasks =
+    row.subtasks?.map((s) => mapIssueToApi(s, { includeSubtasks: false, includeParent: false })) ??
+    undefined;
+
+  let parent =
+    row.parent != null
+      ? {
+          id: row.parent.id,
+          title: row.parent.title,
+          issues_id:
+            row.parent.issuesId != null && row.parent.issuesId !== ""
+              ? row.parent.issuesId
+              : row.parent.id
+        }
+      : undefined;
+
   if (!includeComments) {
     comments = undefined;
   }
   if (!includeActivity) {
     activity = undefined;
+  }
+  if (!includeSubtasks) {
+    subtasks = undefined;
+  }
+  if (!includeParent) {
+    parent = undefined;
   }
 
   const identifier = row.displayIdentifier ?? null;
@@ -56,7 +83,9 @@ function mapIssueToApi(
     workspaceId: row.workspaceId,
     teamId: row.teamId,
     projectId: row.projectId,
+    parentIssueId: row.parentIssueId ?? null,
     cycleId: row.cycleId,
+    cycleEpicId: row.cycleEpicId ?? null,
     title: row.title,
     description: row.description ?? null,
     status: row.status,
@@ -74,7 +103,9 @@ function mapIssueToApi(
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     ...(comments !== undefined ? { comments } : {}),
-    ...(activity !== undefined ? { activity } : {})
+    ...(activity !== undefined ? { activity } : {}),
+    ...(subtasks !== undefined ? { subtasks } : {}),
+    ...(parent !== undefined ? { parent } : {})
   };
 }
 

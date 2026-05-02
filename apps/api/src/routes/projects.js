@@ -26,13 +26,7 @@ function mapProject(p) {
 
     id: p.id,
 
-    organizationId: p.organizationId,
-
-    workspaceId: p.workspaceId,
-
     name: p.name,
-
-    key: p.key,
 
     createdAt: p.createdAt.toISOString(),
 
@@ -42,6 +36,38 @@ function mapProject(p) {
 
 }
 
+/** 从名称生成 key 字母数字片段（全中文等无字母时为空，由调用方回退为 PRJ） */
+function slugKeyFromName(name) {
+  const raw = String(name)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "")
+    .toUpperCase();
+  return raw.slice(0, 12);
+}
+
+function allocateAutoProjectKey(base, keySet) {
+  const root = base && base.length > 0 ? base.slice(0, 12) : "PRJ";
+  let candidate = root;
+  let n = 0;
+  while (keySet.has(candidate)) {
+    n += 1;
+    const suf = String(n);
+    const prefix = root.slice(0, Math.max(1, 12 - suf.length));
+    candidate = `${prefix}${suf}`.slice(0, 12);
+  }
+  return candidate;
+}
+
+
+
+projectsRouter.use((req, res, next) => {
+  if (!req.context?.workspaceId) {
+    return res.status(400).json({ message: "缺少 Workspace 上下文，请登录并选择工作区" });
+  }
+  next();
+});
+
 
 
 projectsRouter.post("/", async (req, res) => {
@@ -50,29 +76,25 @@ projectsRouter.post("/", async (req, res) => {
 
   const workspaceId = req.context.workspaceId;
 
-  const { name, key } = req.body ?? {};
+  const { name } = req.body ?? {};
 
+  const trimmedName = typeof name === "string" ? name.trim() : "";
 
+  if (!trimmedName) {
 
-  if (!name || !key) {
-
-    return res.status(400).json({ message: "name and key are required" });
+    return res.status(400).json({ message: "name is required" });
 
   }
-
-
 
   const list = await listProjectsByWorkspace(organizationId, workspaceId);
 
-  if (list.some((project) => project.key === key)) {
+  const keySet = new Set(list.map((p) => p.key));
 
-    return res.status(409).json({ message: "project key already exists" });
+  const base = slugKeyFromName(trimmedName);
 
-  }
+  const key = allocateAutoProjectKey(base, keySet);
 
-
-
-  const project = await createProject({ organizationId, workspaceId, name, key });
+  const project = await createProject({ organizationId, workspaceId, name: trimmedName, key });
 
   return res.status(201).json(mapProject(project));
 
@@ -120,37 +142,23 @@ projectsRouter.patch("/:id", async (req, res) => {
 
   const workspaceId = req.context.workspaceId;
 
-  const { name, key } = req.body ?? {};
+  const { name } = req.body ?? {};
 
-  if (!name && !key) {
+  if (name == null) {
 
-    return res.status(400).json({ message: "name or key is required" });
-
-  }
-
-  const list = await listProjectsByWorkspace(organizationId, workspaceId);
-
-  if (
-
-    key &&
-
-    list.some((project) => project.id !== req.params.id && project.key === key)
-
-  ) {
-
-    return res.status(409).json({ message: "project key already exists" });
+    return res.status(400).json({ message: "name is required" });
 
   }
 
+  const trimmedName = String(name).trim();
 
+  if (!trimmedName) {
 
-  const project = await updateProject(organizationId, workspaceId, req.params.id, {
+    return res.status(400).json({ message: "name is required" });
 
-    ...(name ? { name } : {}),
+  }
 
-    ...(key ? { key } : {})
-
-  });
+  const project = await updateProject(organizationId, workspaceId, req.params.id, { name: trimmedName });
 
   if (!project) {
 

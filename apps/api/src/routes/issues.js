@@ -20,12 +20,15 @@ async function appendActivity(prismaClient, issueId, type, userId, payload = {})
 }
 
 issuesRouter.post("/", async (req, res) => {
+  const body = req.body ?? {};
   const {
-    projectId,
-    teamId = null,
+    projectId: bodyProjectId,
+    parentIssueId: parentIssueIdRaw,
+    teamId: bodyTeamId = null,
     title,
     description,
-    cycleId = null,
+    cycleId: bodyCycleId = null,
+    cycleEpicId: bodyCycleEpicId = null,
     status = "todo",
     priority: priorityRaw = 0,
     type = "feature",
@@ -33,7 +36,34 @@ issuesRouter.post("/", async (req, res) => {
     assigneeId = null,
     labels = [],
     dueDate = null
-  } = req.body ?? {};
+  } = body;
+
+  let projectId = bodyProjectId;
+  let teamId = bodyTeamId;
+  let resolvedCycleId = bodyCycleId || null;
+  let resolvedEpicId = bodyCycleEpicId || null;
+  let parentIssueIdForCreate = null;
+
+  if (parentIssueIdRaw != null && parentIssueIdRaw !== "") {
+    const parent = await findIssueByRouteParam(String(parentIssueIdRaw), req.context);
+    if (!parent) {
+      return res.status(400).json({ message: "parent issue not found" });
+    }
+    if (parent.parentIssueId) {
+      return res.status(422).json({ message: "cannot create subtask of a subtask" });
+    }
+    const member = await prisma.workspaceMember.findFirst({
+      where: { workspaceId: parent.workspaceId, userId: req.context.userId }
+    });
+    if (!member) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    projectId = parent.projectId;
+    teamId = parent.teamId;
+    resolvedCycleId = parent.cycleId;
+    resolvedEpicId = parent.cycleEpicId;
+    parentIssueIdForCreate = parent.id;
+  }
 
   if (!projectId || !title) {
     return res.status(400).json({ message: "projectId and title are required" });
@@ -75,8 +105,20 @@ issuesRouter.post("/", async (req, res) => {
     }
   }
 
-  if (cycleId) {
-    const rowC = await prisma.cycle.findFirst({ where: { id: cycleId, workspaceId } });
+  if (resolvedEpicId) {
+    const epic = await prisma.cycleEpic.findFirst({
+      where: { id: resolvedEpicId, cycle: { workspaceId } }
+    });
+    if (!epic) {
+      return res.status(400).json({ message: "invalid cycleEpicId" });
+    }
+    if (resolvedCycleId && resolvedCycleId !== epic.cycleId) {
+      return res.status(422).json({ message: "cycleId must match the epic's cycle" });
+    }
+    resolvedCycleId = epic.cycleId;
+    resolvedEpicId = epic.id;
+  } else if (resolvedCycleId) {
+    const rowC = await prisma.cycle.findFirst({ where: { id: resolvedCycleId, workspaceId } });
     if (!rowC) {
       return res.status(400).json({ message: "invalid cycleId for workspace" });
     }
@@ -115,7 +157,9 @@ issuesRouter.post("/", async (req, res) => {
         workspaceId,
         teamId,
         projectId,
-        cycleId,
+        parentIssueId: parentIssueIdForCreate,
+        cycleId: resolvedCycleId,
+        cycleEpicId: resolvedEpicId,
         title,
         description: desc,
         status,
@@ -226,10 +270,19 @@ issuesRouter.get("/:id", async (req, res) => {
     where: { id: slim.id },
     include: {
       comments: { orderBy: { createdAt: "asc" } },
-      activities: { orderBy: { createdAt: "asc" } }
+      activities: { orderBy: { createdAt: "asc" } },
+      subtasks: { orderBy: { createdAt: "asc" } },
+      parent: { select: { id: true, title: true, issuesId: true } }
     }
   });
-  return res.json(mapIssueToApi(issue, { includeComments: true, includeActivity: true }));
+  return res.json(
+    mapIssueToApi(issue, {
+      includeComments: true,
+      includeActivity: true,
+      includeSubtasks: true,
+      includeParent: true
+    })
+  );
 });
 
 issuesRouter.patch("/:id", async (req, res) => {
@@ -250,12 +303,52 @@ issuesRouter.patch("/:id", async (req, res) => {
     "dueDate",
     "projectId",
     "cycleId",
+    "cycleEpicId",
     "teamId"
   ];
   const changes = {};
   for (const key of allowedKeys) {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
       changes[key] = req.body[key];
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, "cycleEpicId")) {
+    const raw = changes.cycleEpicId;
+    if (raw == null || raw === "") {
+      changes.cycleEpicId = null;
+    } else {
+      const epic = await prisma.cycleEpic.findFirst({
+        where: { id: raw, cycle: { workspaceId: req.context.workspaceId } }
+      });
+      if (!epic) {
+        return res.status(422).json({ message: "invalid cycleEpicId" });
+      }
+      changes.cycleEpicId = epic.id;
+      changes.cycleId = epic.cycleId;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, "cycleId")) {
+    if (changes.cycleId == null || changes.cycleId === "") {
+      changes.cycleId = null;
+      changes.cycleEpicId = null;
+    } else {
+      const rowC = await prisma.cycle.findFirst({
+        where: { id: changes.cycleId, workspaceId: req.context.workspaceId }
+      });
+      if (!rowC) {
+        return res.status(422).json({ message: "invalid cycleId" });
+      }
+      const epicId = Object.prototype.hasOwnProperty.call(changes, "cycleEpicId")
+        ? changes.cycleEpicId
+        : issue.cycleEpicId;
+      if (epicId) {
+        const epic = await prisma.cycleEpic.findUnique({ where: { id: epicId } });
+        if (!epic || epic.cycleId !== changes.cycleId) {
+          changes.cycleEpicId = null;
+        }
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Index, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { apiGet, apiPatch, apiPost } from "../../api/client";
 import { WEEKDAY_OPTIONS_JS, previewTeamIterations } from "../../lib/teamCyclePreview";
 import { Btn, Inp, Sel } from "../../ui/primitives.jsx";
@@ -381,25 +381,31 @@ export function TeamSettings(props) {
                 </Btn>
               </div>
             </div>
-            <For each={labels()}>
-              {(row, idx) => (
+            <Index each={labels()}>
+              {(row, index) => (
                 <div class="tst-rows">
-                  <Inp placeholder="标签名" value={row.name} onInput={(e) => updateLabel(idx(), "name", e.target.value)} />
-                  <Inp type="color" value={row.color || "#64748b"} onInput={(e) => updateLabel(idx(), "color", e.target.value)} />
+                  <Inp
+                    placeholder="标签名"
+                    value={row().name}
+                    onInput={(e) => updateLabel(index, "name", e.target.value)}
+                  />
+                  <Inp
+                    type="color"
+                    value={row().color || "#64748b"}
+                    onInput={(e) => updateLabel(index, "color", e.target.value)}
+                  />
                   <Btn
                     variant="text"
                     type="button"
                     class="btn-ordo-danger-text"
                     disabled={labels().length <= 1}
-                    onClick={() =>
-                      setLabels((prev) => prev.filter((_, i) => i !== idx()))
-                    }
+                    onClick={() => setLabels((prev) => prev.filter((_, i) => i !== index))}
                   >
                     移除
                   </Btn>
                 </div>
               )}
-            </For>
+            </Index>
           </form>
         </Show>
 
@@ -416,25 +422,31 @@ export function TeamSettings(props) {
                 </Btn>
               </div>
             </div>
-            <For each={statuses()}>
-              {(row, idx) => (
+            <Index each={statuses()}>
+              {(row, index) => (
                 <div class="tst-rows tst-rows-status">
-                  <Inp placeholder="键（todo / in_progress）" value={row.key} onInput={(e) => updateStatus(idx(), "key", e.target.value)} />
-                  <Inp placeholder="显示名称" value={row.label} onInput={(e) => updateStatus(idx(), "label", e.target.value)} />
+                  <Inp
+                    placeholder="键（todo / in_progress）"
+                    value={row().key}
+                    onInput={(e) => updateStatus(index, "key", e.target.value)}
+                  />
+                  <Inp
+                    placeholder="显示名称"
+                    value={row().label}
+                    onInput={(e) => updateStatus(index, "label", e.target.value)}
+                  />
                   <Btn
                     variant="text"
                     type="button"
                     class="btn-ordo-danger-text"
                     disabled={statuses().length <= 1}
-                    onClick={() =>
-                      setStatuses((prev) => prev.filter((_, i) => i !== idx()))
-                    }
+                    onClick={() => setStatuses((prev) => prev.filter((_, i) => i !== index))}
                   >
                     移除
                   </Btn>
                 </div>
               )}
-            </For>
+            </Index>
           </form>
         </Show>
 

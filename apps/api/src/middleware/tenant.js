@@ -167,7 +167,8 @@ async function tenantMiddleware(req, _res, next) {
 
       workspace?.organizationId || organizationIdFromHeader || null;
 
-    req.context.workspaceId = workspace?.id || req.context.organizationId;
+    /** 必须是 Workspace 表主键（UUID），绝不能回退为 organizationId 字符串，否则 Project 外键会插入失败 */
+    req.context.workspaceId = workspace?.id ?? null;
 
     req.context.userId = user?.id || null;
 

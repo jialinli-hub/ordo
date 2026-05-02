@@ -1,20 +1,29 @@
 :root {
-  --text: #5b4f43;
-  --text-h: #3f3429;
-  --bg: #fdf9f3;
-  --border: #e8ded0;
-  --code-bg: #f7efe4;
-  --accent: #c8a97e;
-  --accent-bg: rgba(200, 169, 126, 0.15);
-  --accent-border: rgba(200, 169, 126, 0.45);
-  --social-bg: rgba(247, 239, 228, 0.8);
+  --text: #18181b;
+  --text-h: #09090b;
+  --text-muted: #71717a;
+  --text-soft: #a1a1aa;
+  --bg: #f4f4f5;
+  --bg-app: #f4f4f5;
+  --bg-sidebar: #fafafa;
+  --bg-elevated: #ffffff;
+  --border: #e4e4e7;
+  --border-subtle: #f4f4f5;
+  --code-bg: #f4f4f5;
+  --accent: #5e6ad2;
+  --accent-hover: #4f5bc4;
+  --accent-muted: rgba(94, 106, 210, 0.16);
+  --accent-bg: rgba(94, 106, 210, 0.12);
+  --accent-border: rgba(94, 106, 210, 0.35);
+  --social-bg: rgba(244, 244, 245, 0.92);
   --shadow:
-    rgba(15, 23, 42, 0.08) 0 10px 40px -12px, rgba(15, 23, 42, 0.06) 0 4px 16px -4px;
+    rgba(15, 23, 42, 0.06) 0 10px 40px -12px, rgba(15, 23, 42, 0.05) 0 4px 16px -4px;
 
-  --sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --heading: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --sans: var(--font);
+  --heading: var(--font);
+  --mono: var(--font-mono);
 
   font: 13px/150% var(--sans);
   letter-spacing: 0.18px;
@@ -33,17 +42,25 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #5b4f43;
-    --text-h: #3f3429;
-    --bg: #fdf9f3;
-    --border: #e8ded0;
-    --code-bg: #f7efe4;
-    --accent: #c8a97e;
-    --accent-bg: rgba(200, 169, 126, 0.15);
-    --accent-border: rgba(200, 169, 126, 0.45);
-    --social-bg: rgba(247, 239, 228, 0.8);
+    --text: #18181b;
+    --text-h: #09090b;
+    --text-muted: #71717a;
+    --text-soft: #a1a1aa;
+    --bg: #f4f4f5;
+    --bg-app: #f4f4f5;
+    --bg-sidebar: #fafafa;
+    --bg-elevated: #ffffff;
+    --border: #e4e4e7;
+    --border-subtle: #f4f4f5;
+    --code-bg: #f4f4f5;
+    --accent: #5e6ad2;
+    --accent-hover: #4f5bc4;
+    --accent-muted: rgba(94, 106, 210, 0.16);
+    --accent-bg: rgba(94, 106, 210, 0.12);
+    --accent-border: rgba(94, 106, 210, 0.35);
+    --social-bg: rgba(244, 244, 245, 0.92);
     --shadow:
-      rgba(15, 23, 42, 0.08) 0 10px 40px -12px, rgba(15, 23, 42, 0.06) 0 4px 16px -4px;
+      rgba(15, 23, 42, 0.06) 0 10px 40px -12px, rgba(15, 23, 42, 0.05) 0 4px 16px -4px;
   }
 
   #social .button-icon {

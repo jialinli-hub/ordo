@@ -10,7 +10,7 @@
   padding: 0 10px;
   min-height: 28px;
   border-radius: 6px;
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   background: var(--surface, #fff);
   color: var(--text, #4b4338);
   cursor: pointer;
@@ -20,9 +20,9 @@
   cursor: not-allowed;
 }
 .btn-ordo-primary {
-  background: linear-gradient(180deg, color-mix(in srgb, #c8a97e 94%, #000) 0%, #c8a97e 100%);
-  border-color: color-mix(in srgb, #c8a97e 82%, #3d3428);
-  color: #2a241d;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent, #5e6ad2) 92%, #000) 0%, var(--accent, #5e6ad2) 100%);
+  border-color: color-mix(in srgb, var(--accent, #5e6ad2) 78%, #18181b);
+  color: #fafafa;
 }
 .btn-ordo-text {
   border-color: transparent;
@@ -40,7 +40,7 @@
   padding: 4px 8px;
   min-height: 28px;
   border-radius: 6px;
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   background: var(--surface, #fff);
   width: 100%;
   box-sizing: border-box;
@@ -60,7 +60,7 @@ textarea.inp-ordo {
   padding: 2px 6px;
   min-height: 28px;
   border-radius: 6px;
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   background: var(--surface, #fff);
   max-width: 100%;
 }
@@ -90,7 +90,7 @@ textarea.inp-ordo {
   max-height: 90vh;
   overflow: auto;
   background: var(--surface-elevated, #fffdfb);
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   border-radius: 12px;
   box-shadow:
     0 18px 50px rgb(52 43 34 / 0.18),
@@ -155,7 +155,7 @@ textarea.inp-ordo {
   min-width: 200px;
   z-index: 50;
   background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   border-radius: 10px;
   box-shadow:
     0 12px 32px rgb(52 43 34 / 0.12),
@@ -176,7 +176,7 @@ textarea.inp-ordo {
   color: inherit;
 }
 .workspace-menu-popup button:hover {
-  background: color-mix(in srgb, #c8a97e 12%, transparent);
+  background: color-mix(in srgb, var(--accent, #5e6ad2) 12%, transparent);
 }
 
 .oro-dropdown-wrap {
@@ -190,7 +190,7 @@ textarea.inp-ordo {
   z-index: 60;
   min-width: 160px;
   background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   border-radius: 10px;
   box-shadow: 0 10px 28px rgb(52 43 34 / 0.12);
   padding: 6px;
@@ -213,7 +213,7 @@ textarea.inp-ordo {
   color: inherit;
 }
 .oro-dropdown-panel button:hover {
-  background: color-mix(in srgb, #c8a97e 10%, transparent);
+  background: color-mix(in srgb, var(--accent, #5e6ad2) 10%, transparent);
 }
 .oro-dropdown-panel button[data-danger="1"] {
   color: #b54747;
@@ -227,7 +227,7 @@ textarea.inp-ordo {
   z-index: 70;
   top: calc(100% + 6px);
   background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #ece2d4);
+  border: 1px solid var(--border, #e4e4e7);
   border-radius: 10px;
   padding: 10px;
   box-shadow: 0 12px 32px rgb(52 43 34 / 0.12);
@@ -272,7 +272,7 @@ textarea.inp-ordo {
   transition: transform 0.15s ease;
 }
 .oro-switch input:checked + .oro-switch-ui {
-  background: color-mix(in srgb, #c8a97e 70%, #6b5640);
+  background: color-mix(in srgb, var(--accent, #5e6ad2) 75%, #3f3f46);
 }
 .oro-switch input:checked + .oro-switch-ui::after {
   transform: translateX(14px);
@@ -286,8 +286,8 @@ textarea.inp-ordo {
   height: 20px;
   border-radius: 6px;
   border: 1px solid rgb(236 226 212 / 0.9);
-  background: rgb(253 249 243 / 0.9);
-  color: var(--text-soft, #5c5349);
+  background: rgb(250 250 250 / 0.95);
+  color: var(--text-soft, #a1a1aa);
 }
 
 .oro-tag-processing {

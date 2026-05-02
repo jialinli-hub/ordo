@@ -1,30 +1,13 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal, onMount } from "solid-js";
 import { Btn, Inp, Modal, TagSpan } from "../../ui/primitives.jsx";
 import { apiGet, apiPost } from "../../api/client";
-import { PRIORITY_META, STATUS_META, TYPE_LABEL } from "../issues/issueUi";
+import { GROUP_ORDER, STATUS_META, TYPE_LABEL } from "../issues/issueUi";
 
-function metricMax(obj) {
-  if (!obj || typeof obj !== "object") {
-    return 1;
-  }
-  const vals = Object.values(obj).map((n) => Number(n) || 0);
-  const m = Math.max(0, ...vals);
-  return m > 0 ? m : 1;
-}
-
-function CycleBarRow(pp) {
-  const max = () => pp.max || 1;
-  const n = () => Number(pp.value || 0);
-  const pct = () => Math.round((n() / max()) * 100);
-  return (
-    <div class="cycle-metric-bar-row">
-      <span class="cycle-metric-bar-label">{pp.label}</span>
-      <div class="cycle-metric-bar-track">
-        <div class="cycle-metric-bar-fill" style={{ width: `${pct()}%`, background: pp.color || "var(--accent, #c8a97e)" }} />
-      </div>
-      <span class="cycle-metric-bar-num">{n()}</span>
-    </div>
-  );
+function formatCycleRange(startsAt, endsAt) {
+  const s = new Date(startsAt);
+  const e = new Date(endsAt);
+  const o = { month: "short", day: "numeric" };
+  return `${s.toLocaleDateString("zh-CN", o)} – ${e.toLocaleDateString("zh-CN", o)}`;
 }
 
 function computeCycleStatus(startsAt, endsAt, now = new Date()) {
@@ -39,6 +22,61 @@ function computeCycleStatus(startsAt, endsAt, now = new Date()) {
   return "active";
 }
 
+/** 当前进行中的迭代：取已开始时间最晚的一条（避免重叠窗口歧义） */
+function pickCurrentCycle(raw, now = new Date()) {
+  const actives = raw.filter((item) => computeCycleStatus(item.startsAt, item.endsAt, now) === "active");
+  if (actives.length === 0) {
+    return [];
+  }
+  actives.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+  return [actives[0]];
+}
+
+/** 下个迭代：未开始且开始时间最早的一条 */
+function pickNextUpcomingCycle(raw, now = new Date()) {
+  const planned = raw.filter((item) => computeCycleStatus(item.startsAt, item.endsAt, now) === "planned");
+  if (planned.length === 0) {
+    return [];
+  }
+  planned.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  return [planned[0]];
+}
+
+const TYPE_KEYS = ["feature", "bug", "chore"];
+
+const TYPE_LABEL_ZH = {
+  feature: "功能",
+  bug: TYPE_LABEL.bug,
+  chore: "事务"
+};
+
+function statusCountFromSummary(summary, key) {
+  if (summary?.byStatus && typeof summary.byStatus[key] === "number") {
+    return summary.byStatus[key];
+  }
+  const legacy = {
+    todo: summary?.todoIssues,
+    in_progress: summary?.inProgressIssues,
+    in_review: summary?.inReviewIssues,
+    done: summary?.doneIssues
+  };
+  return Number(legacy[key] ?? 0);
+}
+
+function typeCountFromSummary(summary, key) {
+  return Number(summary?.byType?.[key] ?? 0);
+}
+
+/** 单行迭代任务完成进度（用于进度条与文案，非列表汇总） */
+function rowIssueProgress(item) {
+  const s = item.summary || {};
+  const total = Number(s.totalIssues || 0);
+  const done = Number(s.doneIssues || 0);
+  const pct =
+    total > 0 ? Math.round((done / total) * 100) : Math.round(Number(s.completionRate || 0));
+  return { done, total, pct };
+}
+
 export function CycleList(props) {
   const cycleView = () => props.cycleView ?? "all";
   const title = () => props.title ?? "Cycles";
@@ -50,32 +88,20 @@ export function CycleList(props) {
   const [endsAt, setEndsAt] = createSignal("");
   const [error, setError] = createSignal("");
   const [createOpen, setCreateOpen] = createSignal(false);
-  const [metrics, setMetrics] = createSignal(null);
+  const [epicDraft, setEpicDraft] = createSignal({});
 
-  /** 忽略过期的 GET 结果，避免 onMount 与创建后刷新的并发请求乱序覆盖列表 */
   let refreshSeq = 0;
 
+  /** all：全部迭代（开始时间新→旧）；current / upcoming：各只展示一条 */
   const displayed = createMemo(() => {
+    const raw = items();
     if (cycleView() === "current") {
-      return items().filter((item) => computeCycleStatus(item.startsAt, item.endsAt) === "active");
+      return pickCurrentCycle(raw);
     }
     if (cycleView() === "upcoming") {
-      return items().filter((item) => computeCycleStatus(item.startsAt, item.endsAt) === "planned");
+      return pickNextUpcomingCycle(raw);
     }
-    return items();
-  });
-
-  const aggregateSummary = createMemo(() => {
-    return displayed().reduce(
-      (acc, item) => {
-        const summary = item.summary || {};
-        acc.totalIssues += Number(summary.totalIssues || 0);
-        acc.inProgressIssues += Number(summary.inProgressIssues || 0);
-        acc.doneIssues += Number(summary.doneIssues || 0);
-        return acc;
-      },
-      { totalIssues: 0, inProgressIssues: 0, doneIssues: 0 }
-    );
+    return [...raw].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
   });
 
   async function refreshList() {
@@ -87,34 +113,12 @@ export function CycleList(props) {
       return;
     }
     const batch = Array.isArray(data.items) ? data.items : [];
-    // 新数组引用，避免与上一轮同一引用时 Solid 跳过更新（含内存 store / 原位 push 的场景）
     setItems([...batch]);
   }
 
   onMount(() => {
     refreshList().catch(() => {
       setError("Cycle 加载失败");
-    });
-  });
-
-  createEffect(() => {
-    const id = teamId();
-    if (!id) {
-      setMetrics(null);
-      return;
-    }
-    let alive = true;
-    apiGet(`/api/cycles/team-metrics?teamId=${encodeURIComponent(id)}`)
-      .then((data) => {
-        if (alive) {
-          setMetrics(data);
-        }
-      })
-      .catch(() => {
-        /* 图表为增强能力，失败静默 */
-      });
-    onCleanup(() => {
-      alive = false;
     });
   });
 
@@ -142,14 +146,30 @@ export function CycleList(props) {
     }
   }
 
+  async function handleAddEpic(cycleId) {
+    const key = cycleId;
+    const raw = (epicDraft()[key] ?? "").trim();
+    if (!raw) {
+      return;
+    }
+    setError("");
+    try {
+      await apiPost(`/api/cycles/${encodeURIComponent(cycleId)}/epics`, { name: raw });
+      setEpicDraft((prev) => ({ ...prev, [key]: "" }));
+      await refreshList();
+    } catch {
+      setError("添加大需求失败");
+    }
+  }
+
   function statusLabel(status) {
     if (status === "active") {
-      return "Current";
+      return "当前";
     }
     if (status === "planned") {
-      return "Upcoming";
+      return "未开始";
     }
-    return "Completed";
+    return "已结束";
   }
 
   function statusTagColor(status) {
@@ -162,133 +182,170 @@ export function CycleList(props) {
     return "success";
   }
 
-  const statusBars = createMemo(() => {
-    const m = metrics()?.issueTotals?.byStatus;
-    if (!m) {
-      return [];
-    }
-    const max = metricMax(m);
-    return Object.entries(m).map(([k, v]) => ({
-      label: STATUS_META[k]?.label ?? k,
-      value: v,
-      max,
-      color: STATUS_META[k]?.dot
-    }));
-  });
-
-  const typeBars = createMemo(() => {
-    const m = metrics()?.issueTotals?.byType;
-    if (!m) {
-      return [];
-    }
-    const max = metricMax(m);
-    return Object.entries(m).map(([k, v]) => ({
-      label: TYPE_LABEL[k] ?? k,
-      value: v,
-      max,
-      color: k === "bug" ? "#dc2626" : k === "feature" ? "#2563eb" : "#64748b"
-    }));
-  });
-
-  const priorityBars = createMemo(() => {
-    const m = metrics()?.issueTotals?.byPriority;
-    if (!m) {
-      return [];
-    }
-    const max = metricMax(m);
-    return [0, 1, 2, 3, 4].map((pri) => ({
-      label: PRIORITY_META[pri] ?? `P${pri}`,
-      value: m[pri] ?? m[String(pri)] ?? 0,
-      max,
-      color: "#64748b"
-    }));
-  });
-
   return (
     <section class="cycle-panel surface-card">
       <div class="cycle-header-row">
-        <h2 class="panel-title">{title()}</h2>
+        <h2 class="panel-title cycle-page-title">{title()}</h2>
         <Btn variant="primary" onClick={() => setCreateOpen(true)}>
           创建 Cycle
         </Btn>
       </div>
       {error() ? <p class="error-text">{error()}</p> : null}
-      <div class="cycle-overview-strip">
-        <span>总任务 {aggregateSummary().totalIssues}</span>
-        <span>进行中 {aggregateSummary().inProgressIssues}</span>
-        <span>已完成 {aggregateSummary().doneIssues}</span>
-      </div>
-
-      <Show when={metrics()} keyed>
-        {(met) => (
-          <div class="cycle-metrics-panel">
-            <h3 class="cycle-metrics-title">
-              团队概览 <span class="muted">· {met.teamName ?? ""}</span>
-            </h3>
-            <div class="cycle-metrics-kpis">
-              <div class="cycle-kpi-chip">
-                <span class="muted">任务总数</span>
-                <strong>{met.issueTotals?.count ?? 0}</strong>
-              </div>
-              <div class="cycle-kpi-chip">
-                <span class="muted">预估工时 Σ</span>
-                <strong>{Number(met.issueTotals?.estimateHours || 0).toFixed(1)} h</strong>
-              </div>
-            </div>
-            <div class="cycle-metrics-charts">
-              <div class="cycle-metric-card surface-card">
-                <h4 class="cycle-metric-card-title">按状态</h4>
-                <For each={statusBars()}>{(row) => <CycleBarRow {...row} />}</For>
-              </div>
-              <div class="cycle-metric-card surface-card">
-                <h4 class="cycle-metric-card-title">按类型</h4>
-                <For each={typeBars()}>{(row) => <CycleBarRow {...row} />}</For>
-              </div>
-              <div class="cycle-metric-card surface-card">
-                <h4 class="cycle-metric-card-title">按优先级</h4>
-                <For each={priorityBars()}>{(row) => <CycleBarRow {...row} />}</For>
-              </div>
-            </div>
-            <div class="cycle-metric-card surface-card cycle-recent-cycles">
-              <h4 class="cycle-metric-card-title">最近迭代完成情况</h4>
-              <div class="cycle-recent-table-head">
-                <span>名称</span>
-                <span>状态</span>
-                <span>完成率</span>
-                <span>任务</span>
-              </div>
-              <For each={met.cycles || []}>
-                {(c) => (
-                  <div class="cycle-recent-row">
-                    <span class="cycle-recent-name">{c.name}</span>
-                    <span class="muted">{c.status}</span>
-                    <span>{Math.round(Number(c.summary?.completionRate || 0))}%</span>
-                    <span>
-                      {c.summary?.doneIssues ?? 0}/{c.summary?.totalIssues ?? 0}
-                    </span>
-                  </div>
-                )}
-              </For>
-            </div>
-          </div>
-        )}
-      </Show>
 
       <ul class="cycle-list">
         {displayed().map((item) => (
           <li class="cycle-row-card" data-key={item.id}>
-            <div class="cycle-row-main">
-              <strong>{item.name}</strong>
-              <TagSpan color={statusTagColor(item.status)}>{statusLabel(item.status)}</TagSpan>
+            {/* 单行三栏：与其它内容隔离，避免与下方明细同属 grid 时错位 */}
+            <div class="cycle-row-primary">
+              <div class="cycle-row-col cycle-row-col--name">
+                <div class="cycle-row-nameblock">
+                  <strong class="cycle-row-name">{item.name}</strong>
+                  <TagSpan color={statusTagColor(computeCycleStatus(item.startsAt, item.endsAt))}>
+                    {statusLabel(computeCycleStatus(item.startsAt, item.endsAt))}
+                  </TagSpan>
+                </div>
+              </div>
+              <div class="cycle-row-col cycle-row-col--stats">
+                <div class="cycle-row-dates muted">{formatCycleRange(item.startsAt, item.endsAt)}</div>
+                <div class="cycle-row-progress-stack">
+                  <div class="cycle-row-progress-track">
+                    <div
+                      class="cycle-row-progress-fill"
+                      style={{ width: `${rowIssueProgress(item).pct}%` }}
+                    />
+                  </div>
+                  <div class="cycle-row-progress-feet muted">
+                    <span class="cycle-row-progress-meta">
+                      {(() => {
+                        const { done, total, pct } = rowIssueProgress(item);
+                        return total > 0 ? `${done}/${total} · ${pct}%` : `— / — · ${pct}%`;
+                      })()}
+                    </span>
+                    <div class="cycle-row-metrics-inline">
+                      <span>任务 {item.summary?.totalIssues ?? 0}</span>
+                      <span class="cycle-row-metrics-sep">·</span>
+                      <span>已完成 {item.summary?.doneIssues ?? 0}</span>
+                      <span class="cycle-row-metrics-sep">·</span>
+                      <span>完成率 {Math.round(Number(item.summary?.completionRate || 0))}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="cycle-row-col cycle-row-col--epics">
+                <div class="cycle-epics-block cycle-epics-block--rail">
+                  <span class="cycle-epics-label">大需求</span>
+                  <div class="cycle-epics-chips">
+                    <For each={item.epics ?? []}>
+                      {(ep) => <span class="cycle-epic-chip">{ep.name}</span>}
+                    </For>
+                    <Show when={!item.epics?.length}>
+                      <span class="muted cycle-epics-empty">暂无</span>
+                    </Show>
+                  </div>
+                  <div class="cycle-epic-add">
+                    <Inp
+                      aria-label={`大需求名称 ${item.name}`}
+                      class="cycle-epic-add-input"
+                      placeholder="输入大需求名称"
+                      value={epicDraft()[item.id] ?? ""}
+                      onInput={(e) =>
+                        setEpicDraft((prev) => ({ ...prev, [item.id]: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddEpic(item.id);
+                        }
+                      }}
+                    />
+                    <Btn type="button" variant="default" onClick={() => handleAddEpic(item.id)}>
+                      添加
+                    </Btn>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="cycle-row-metrics">
-              <span>完成率 {Math.round(Number(item.summary?.completionRate || 0))}%</span>
-              <span>总任务 {item.summary?.totalIssues || 0}</span>
-              <span>进行中 {item.summary?.inProgressIssues || 0}</span>
-              <span>已完成 {item.summary?.doneIssues || 0}</span>
-              <span>评审中 {item.summary?.inReviewIssues || 0}</span>
-              <span>{item.summary?.scopeCount || 0} scope</span>
-            </div>
+            <Show when={cycleView() === "current"}>
+              <div class="cycle-current-analytics" aria-label="当前迭代详细统计">
+                <div class="cycle-analytics-row2">
+                  <div class="cycle-analytics-block">
+                    <h4 class="cycle-analytics-block-title">按状态</h4>
+                    <ul class="cycle-analytics-list">
+                      <For each={GROUP_ORDER}>
+                        {(st) => {
+                          const n = statusCountFromSummary(item.summary, st);
+                          const total = Number(item.summary?.totalIssues || 0);
+                          const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+                          return (
+                            <li class="cycle-analytics-metric-row">
+                              <span class="cycle-analytics-metric-label">{STATUS_META[st]?.label ?? st}</span>
+                              <span class="cycle-analytics-metric-num">{n}</span>
+                              <div class="cycle-analytics-metric-track">
+                                <div
+                                  class="cycle-analytics-metric-fill"
+                                  style={{
+                                    width: `${pct}%`,
+                                    background: STATUS_META[st]?.dot || "#94a3b8"
+                                  }}
+                                />
+                              </div>
+                              <span class="cycle-analytics-metric-pct muted">{pct}%</span>
+                            </li>
+                          );
+                        }}
+                      </For>
+                    </ul>
+                  </div>
+                  <div class="cycle-analytics-block">
+                    <h4 class="cycle-analytics-block-title">按类别</h4>
+                    <ul class="cycle-analytics-list">
+                      <For each={TYPE_KEYS}>
+                        {(tp) => {
+                          const n = typeCountFromSummary(item.summary, tp);
+                          const total = Number(item.summary?.totalIssues || 0);
+                          const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+                          return (
+                            <li class="cycle-analytics-metric-row">
+                              <span class="cycle-analytics-metric-label">{TYPE_LABEL_ZH[tp] ?? TYPE_LABEL[tp]}</span>
+                              <span class="cycle-analytics-metric-num">{n}</span>
+                              <div class="cycle-analytics-metric-track">
+                                <div class="cycle-analytics-metric-fill cycle-analytics-metric-fill--type" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span class="cycle-analytics-metric-pct muted">{pct}%</span>
+                            </li>
+                          );
+                        }}
+                      </For>
+                    </ul>
+                  </div>
+                  <div class="cycle-analytics-block">
+                    <h4 class="cycle-analytics-block-title">工时</h4>
+                    <dl class="cycle-analytics-dl">
+                      <div class="cycle-analytics-dl-row">
+                        <dt>已登记总工时</dt>
+                        <dd>{Number(item.summary?.estimateHoursTotal ?? 0)} h</dd>
+                      </div>
+                      <div class="cycle-analytics-dl-row">
+                        <dt>已完成任务工时</dt>
+                        <dd>{Number(item.summary?.estimateHoursDone ?? 0)} h</dd>
+                      </div>
+                      <div class="cycle-analytics-dl-row">
+                        <dt>剩余工时（未完成任务）</dt>
+                        <dd>{Number(item.summary?.estimateHoursRemaining ?? 0)} h</dd>
+                      </div>
+                      <div class="cycle-analytics-dl-row">
+                        <dt>未填估算任务数</dt>
+                        <dd>{Number(item.summary?.estimateUnset ?? 0)}</dd>
+                      </div>
+                      <div class="cycle-analytics-dl-row">
+                        <dt>范围任务数</dt>
+                        <dd>{Number(item.summary?.scopeCount ?? item.summary?.totalIssues ?? 0)}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </Show>
           </li>
         ))}
       </ul>

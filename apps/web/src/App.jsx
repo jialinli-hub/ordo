@@ -219,13 +219,10 @@ function SvgIconCycle() {
   );
 }
 
-function SvgIconWorkspace() {
+function SvgIconChevronDown() {
   return (
-    <svg class="nav-ico-svg nav-ico-workspace" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true">
-      <rect x="3" y="4" width="8" height="8" rx="1.75" />
-      <rect x="13" y="4" width="8" height="8" rx="1.75" />
-      <rect x="3" y="14" width="8" height="8" rx="1.75" />
-      <rect x="13" y="14" width="8" height="8" rx="1.75" />
+    <svg class="workspace-menu-chevron-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }
@@ -295,18 +292,24 @@ function SideNav(p) {
       </div>
       <div class="workspace-menu-wrap" ref={wmRoot}>
         <Btn
-          class="workspace-menu-btn workspace-menu-btn--with-icon"
+          class={[
+            "workspace-menu-btn workspace-menu-trigger",
+            workspaceMenuOpen() ? "workspace-menu-trigger--open" : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
           variant="default"
-          aria-label="Workspace 菜单"
+          aria-label={`Workspace 菜单${p.currentWorkspace?.name ? `：${p.currentWorkspace.name}` : ""}`}
+          aria-expanded={workspaceMenuOpen()}
           onClick={(ev) => {
             ev.stopPropagation();
             setWorkspaceMenuOpen(!workspaceMenuOpen());
           }}
         >
-          <span class="nav-link-icon workspace-menu-trigger-ico">
-            <SvgIconWorkspace />
+          <span class="workspace-menu-trigger-name">{p.currentWorkspace?.name || "未选择"}</span>
+          <span class="workspace-menu-chevron">
+            <SvgIconChevronDown />
           </span>
-          <span class="workspace-menu-trigger-label">Workspace</span>
         </Btn>
         <Show when={workspaceMenuOpen()}>
           <div class="workspace-menu-popup" role="menu">
@@ -342,7 +345,6 @@ function SideNav(p) {
             </button>
           </div>
         </Show>
-        <p class="workspace-menu-current">当前：{p.currentWorkspace?.name || "未选择"}</p>
       </div>
       <nav class="side-nav-links">
         <p class="group-title group-title-plain">Workspace</p>
@@ -394,40 +396,82 @@ function SideNav(p) {
                           >
                             Issues
                           </NavLink>
-                          <div class="team-submenu-group">
-                            <NavLink
-                              icon={<SvgIconCycle />}
-                              href={buildWorkspacePath(p.currentWorkspace, `/workspace/teams/${teamSegmentForUrl(team)}/cycles`)}
-                              active={
-                                isActiveTeam &&
-                                (teamRoute()?.section === "cycles-all" ||
-                                  teamRoute()?.section === "cycles-current" ||
-                                  teamRoute()?.section === "cycles-upcoming")
-                              }
-                              class="team-submenu-title"
+                          <NavLink
+                            icon={<SvgIconCycle />}
+                            href={buildWorkspacePath(p.currentWorkspace, `/workspace/teams/${teamSegmentForUrl(team)}/cycles`)}
+                            active={
+                              isActiveTeam &&
+                              (teamRoute()?.section === "cycles-all" ||
+                                teamRoute()?.section === "cycles-current" ||
+                                teamRoute()?.section === "cycles-upcoming")
+                            }
+                          >
+                            Cycles
+                          </NavLink>
+                          <div class="cycle-nav-sub" role="group" aria-label="迭代视图">
+                            <a
+                              class="cycle-nav-sublink"
+                              classList={{
+                                active: isActiveTeam && teamRoute()?.section === "cycles-all"
+                              }}
+                              href={buildWorkspacePath(
+                                p.currentWorkspace,
+                                `/workspace/teams/${teamSegmentForUrl(team)}/cycles`
+                              )}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                navigateTo(
+                                  buildWorkspacePath(
+                                    p.currentWorkspace,
+                                    `/workspace/teams/${teamSegmentForUrl(team)}/cycles`
+                                  )
+                                );
+                              }}
                             >
-                              Cycle
-                            </NavLink>
-                            <div class="team-submenu-items">
-                              <NavLink
-                                href={buildWorkspacePath(
-                                  p.currentWorkspace,
-                                  `/workspace/teams/${teamSegmentForUrl(team)}/cycles/current`
-                                )}
-                                active={isActiveTeam && teamRoute()?.section === "cycles-current"}
-                              >
-                                Current
-                              </NavLink>
-                              <NavLink
-                                href={buildWorkspacePath(
-                                  p.currentWorkspace,
-                                  `/workspace/teams/${teamSegmentForUrl(team)}/cycles/upcoming`
-                                )}
-                                active={isActiveTeam && teamRoute()?.section === "cycles-upcoming"}
-                              >
-                                Upcoming
-                              </NavLink>
-                            </div>
+                              全部
+                            </a>
+                            <a
+                              class="cycle-nav-sublink"
+                              classList={{
+                                active: isActiveTeam && teamRoute()?.section === "cycles-current"
+                              }}
+                              href={buildWorkspacePath(
+                                p.currentWorkspace,
+                                `/workspace/teams/${teamSegmentForUrl(team)}/cycles/current`
+                              )}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                navigateTo(
+                                  buildWorkspacePath(
+                                    p.currentWorkspace,
+                                    `/workspace/teams/${teamSegmentForUrl(team)}/cycles/current`
+                                  )
+                                );
+                              }}
+                            >
+                              当前
+                            </a>
+                            <a
+                              class="cycle-nav-sublink"
+                              classList={{
+                                active: isActiveTeam && teamRoute()?.section === "cycles-upcoming"
+                              }}
+                              href={buildWorkspacePath(
+                                p.currentWorkspace,
+                                `/workspace/teams/${teamSegmentForUrl(team)}/cycles/upcoming`
+                              )}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                navigateTo(
+                                  buildWorkspacePath(
+                                    p.currentWorkspace,
+                                    `/workspace/teams/${teamSegmentForUrl(team)}/cycles/upcoming`
+                                  )
+                                );
+                              }}
+                            >
+                              下个迭代
+                            </a>
                           </div>
                         </div>
                         <div class="team-links team-links-settings">
@@ -1210,34 +1254,20 @@ export default function App() {
         );
       }
 
-      if (tr.section === "cycles-current") {
+      if (
+        tr.section === "cycles-all" ||
+        tr.section === "cycles-current" ||
+        tr.section === "cycles-upcoming"
+      ) {
+        const cycleView =
+          tr.section === "cycles-current" ? "current" : tr.section === "cycles-upcoming" ? "upcoming" : "all";
+        const cyclePageTitle =
+          tr.section === "cycles-current" ? "当前迭代" : tr.section === "cycles-upcoming" ? "下个迭代" : "迭代";
         return (
           <div class="main-area">
-            <section class="content page-wrap">
-              <PageHeader title="Current cycle" subtitle={team.name} />
-              <CycleList teamId={team.id} cycleView="current" title="Current" />
-            </section>
-          </div>
-        );
-      }
-
-      if (tr.section === "cycles-all") {
-        return (
-          <div class="main-area">
-            <section class="content page-wrap">
-              <PageHeader title="Cycles" subtitle={team.name} />
-              <CycleList teamId={team.id} cycleView="all" title="Cycles" />
-            </section>
-          </div>
-        );
-      }
-
-      if (tr.section === "cycles-upcoming") {
-        return (
-          <div class="main-area">
-            <section class="content page-wrap">
-              <PageHeader title="Upcoming cycles" subtitle={team.name} />
-              <CycleList teamId={team.id} cycleView="upcoming" title="Upcoming" />
+            <section class="content page-wrap cycle-page-wrap">
+              <PageHeader title={cyclePageTitle} subtitle={team.name} />
+              <CycleList teamId={team.id} cycleView={cycleView} title={cyclePageTitle} />
             </section>
           </div>
         );

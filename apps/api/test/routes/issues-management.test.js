@@ -84,6 +84,55 @@ test("issue management should support create update comments activity and delete
   assert.equal(deleteAgainRes.statusCode, 404);
 });
 
+test("parent issue can create one-level subtasks", async () => {
+  const authHeaders = {
+    Authorization: "Bearer dev-dingtalk:alice@example.com",
+    "x-organization-id": "org-issue-subtasks"
+  };
+
+  const teamRes = await request(app).post("/api/teams").set(authHeaders).send({ name: "Sub Team" });
+  assert.equal(teamRes.statusCode, 201);
+
+  const projectRes = await request(app)
+    .post("/api/projects")
+    .set(authHeaders)
+    .send({ name: "Sub Project", key: "SP" });
+  assert.equal(projectRes.statusCode, 201);
+
+  const parentRes = await request(app).post("/api/issues").set(authHeaders).send({
+    projectId: projectRes.body.id,
+    teamId: teamRes.body.id,
+    title: "Parent task"
+  });
+  assert.equal(parentRes.statusCode, 201);
+  const parentId = parentRes.body.id;
+
+  const childRes = await request(app).post("/api/issues").set(authHeaders).send({
+    parentIssueId: parentId,
+    title: "Subtask A"
+  });
+  assert.equal(childRes.statusCode, 201);
+  assert.equal(childRes.body.parentIssueId, parentId);
+  assert.equal(childRes.body.projectId, projectRes.body.id);
+
+  const detailRes = await request(app).get(`/api/issues/${parentId}`).set(authHeaders);
+  assert.equal(detailRes.statusCode, 200);
+  assert.equal(detailRes.body.subtasks.length, 1);
+  assert.equal(detailRes.body.subtasks[0].title, "Subtask A");
+
+  const childOfChild = await request(app).post("/api/issues").set(authHeaders).send({
+    parentIssueId: childRes.body.id,
+    title: "Should fail"
+  });
+  assert.equal(childOfChild.statusCode, 422);
+
+  const listRes = await request(app)
+    .get(`/api/issues?teamId=${encodeURIComponent(teamRes.body.id)}&pageSize=50`)
+    .set(authHeaders);
+  assert.equal(listRes.statusCode, 200);
+  assert.equal(listRes.body.items.some((x) => x.id === childRes.body.id), false);
+});
+
 test("GET /api/issues/:id works when issue.workspaceId mismatches but team is in current workspace", async () => {
   const authHeaders = {
     Authorization: "Bearer dev-dingtalk:alice@example.com",

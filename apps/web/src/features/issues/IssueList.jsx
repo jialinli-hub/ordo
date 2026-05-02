@@ -450,6 +450,7 @@ function emptyCreateForm() {
     priority: 2,
     projectId: "",
     cycleId: null,
+    cycleEpicId: null,
     estimateHours: "",
     labels: "",
     dueDate: "",
@@ -529,6 +530,7 @@ export function IssueList(raw) {
   const [filter, setFilter] = createSignal(emptyIssueFilter());
   const [rangeTab, setRangeTab] = createSignal("all");
   const [viewPrefs, setViewPrefs] = createSignal(defaultIssueViewPrefs());
+  const [cycleEpics, setCycleEpics] = createSignal([]);
 
   createEffect(() => {
     const tid = props.teamId;
@@ -676,6 +678,29 @@ export function IssueList(raw) {
     }
   });
 
+  createEffect(() => {
+    const cid = form().cycleId;
+    if (!cid || !showCreateModal()) {
+      setCycleEpics([]);
+      return;
+    }
+    let alive = true;
+    apiGet(`/api/cycles/${encodeURIComponent(cid)}/epics`)
+      .then((d) => {
+        if (alive) {
+          setCycleEpics(d.items ?? []);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setCycleEpics([]);
+        }
+      });
+    onCleanup(() => {
+      alive = false;
+    });
+  });
+
   function openCreateModalForType(type) {
     setError("");
     mergeForm({
@@ -716,6 +741,7 @@ export function IssueList(raw) {
         status: f.status,
         priority: Number(f.priority),
         cycleId: f.cycleId || null,
+        cycleEpicId: f.cycleEpicId || null,
         estimateHours: (() => {
           if (f.estimateHours === "" || f.estimateHours == null) {
             return null;
@@ -736,7 +762,8 @@ export function IssueList(raw) {
           ...emptyCreateForm(),
           type: f.type,
           projectId: f.projectId,
-          cycleId: f.cycleId
+          cycleId: f.cycleId,
+          cycleEpicId: f.cycleEpicId
         });
       } else {
         closeCreateModal();
@@ -972,9 +999,7 @@ export function IssueList(raw) {
               {memberShort(issue.assigneeId)}
             </span>
           ) : (
-            <span class="muted issue-row-mini" aria-hidden>
-              👤
-            </span>
+            <span class="issue-unassigned" aria-hidden title="未指派" />
           )
         ) : null}
         {c.created ? (
@@ -1400,6 +1425,15 @@ export function IssueList(raw) {
     return cyc?.name ?? "迭代";
   }
 
+  function epicLabel() {
+    const f = form();
+    if (!f.cycleEpicId) {
+      return "大需求";
+    }
+    const ep = cycleEpics().find((e) => e.id === f.cycleEpicId);
+    return ep?.name ?? "大需求";
+  }
+
   function assigneeLabel() {
     const f = form();
     if (!f.assigneeId) {
@@ -1431,7 +1465,7 @@ export function IssueList(raw) {
         <section class="issue-panel surface-card">
           <div class="issue-toolbar issue-toolbar-extended">
             <div class="issue-toolbar-left">
-              <h2 class="panel-title">Issues</h2>
+              <h2 class="panel-title issue-page-title">任务</h2>
               <div class="issue-range-tabs">
                 <button
                   type="button"
@@ -1459,7 +1493,7 @@ export function IssueList(raw) {
             <div class="issue-toolbar-actions">
               <Popover placement="bottomRight" title="视图与显示" content={displayPopoverInner}>
                 <Btn variant="default" aria-label="视图与显示" class="toolbar-quiet-btn">
-                  ≡ 显示
+                  视图
                 </Btn>
               </Popover>
               <Popover placement="bottomRight" title="筛选任务" content={filterPopoverInner}>
@@ -1468,12 +1502,12 @@ export function IssueList(raw) {
                   aria-label="筛选任务"
                   class={filterIsActive() ? "toolbar-quiet-btn toolbar-quiet-btn--filters-on" : "toolbar-quiet-btn"}
                 >
-                  ≡ 筛选
+                  筛选
                 </Btn>
               </Popover>
               <Dropdown items={createMenuDropdownItems()}>
-                <Btn variant="primary" aria-label="打开新建任务菜单">
-                  新增任务 ▼
+                <Btn variant="primary" aria-label="打开新建任务菜单" class="btn-new-issue">
+                  新建
                 </Btn>
               </Dropdown>
             </div>
@@ -1580,7 +1614,8 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      ⚡ {priorityLabel()}
+                      <span class="issue-pill-prefix">P</span>
+                      {priorityLabel()}
                     </button>
                   </Popover>
 
@@ -1602,7 +1637,8 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      👤 {assigneeLabel()}
+                      <span class="issue-pill-prefix">@</span>
+                      {assigneeLabel()}
                     </button>
                   </Popover>
 
@@ -1619,7 +1655,8 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      ⊞ {projectLabel()}
+                      <span class="issue-pill-prefix">□</span>
+                      {projectLabel()}
                     </button>
                   </Popover>
 
@@ -1639,7 +1676,8 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      ⏱ 预估
+                      <span class="issue-pill-prefix issue-pill-prefix--mono">h</span>
+                      预估
                     </button>
                   </Popover>
 
@@ -1656,7 +1694,8 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      # 标签
+                      <span class="issue-pill-prefix">#</span>
+                      标签
                     </button>
                   </Popover>
 
@@ -1667,7 +1706,7 @@ export function IssueList(raw) {
                         aria-label="Issue cycle"
                         style={{ minWidth: "220px" }}
                         value={form().cycleId || ""}
-                        onChange={(value) => mergeForm({ cycleId: value || null })}
+                        onChange={(value) => mergeForm({ cycleId: value || null, cycleEpicId: null })}
                         options={[
                           { value: "", label: "不关联迭代" },
                           ...cycles().map((c) => ({
@@ -1679,15 +1718,37 @@ export function IssueList(raw) {
                     }
                   >
                     <button type="button" class="issue-create-pill">
-                      ▶ {cycleLabel()}
+                      <span class="issue-pill-prefix">↻</span>
+                      {cycleLabel()}
+                    </button>
+                  </Popover>
+
+                  <Popover
+                    placement="bottomLeft"
+                    content={
+                      <Sel
+                        aria-label="大需求"
+                        style={{ minWidth: "220px" }}
+                        value={form().cycleEpicId || ""}
+                        onChange={(value) => mergeForm({ cycleEpicId: value || null })}
+                        options={[
+                          { value: "", label: form().cycleId ? "不关联大需求" : "请先选择迭代" },
+                          ...cycleEpics().map((e) => ({ value: e.id, label: e.name }))
+                        ]}
+                      />
+                    }
+                  >
+                    <button type="button" class="issue-create-pill" disabled={!form().cycleId}>
+                      <span class="issue-pill-prefix">◇</span>
+                      {epicLabel()}
                     </button>
                   </Popover>
                 </div>
               </div>
 
               <footer class="issue-create-footer">
-                <Btn variant="text" disabled aria-label="附件（即将支持）">
-                  📎
+                <Btn variant="text" disabled aria-label="附件（即将支持）" class="issue-create-attach-btn">
+                  附件
                 </Btn>
                 <div class="issue-create-footer-center">
                   <span class="issue-create-footer-label">继续创建</span>

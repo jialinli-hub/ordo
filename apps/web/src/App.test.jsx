@@ -94,14 +94,12 @@ describe("App shell pages", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Projects", level: 1 })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Workspace 菜单" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Workspace 菜单/ })).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Project search")).toBeInTheDocument();
     await waitFor(() => {
       const panel = document.querySelector(".project-panel");
       expect(panel).toBeTruthy();
       expect(within(panel).getByText("trex-product")).toBeInTheDocument();
-      expect(within(panel).getByText("未设置 Key")).toBeInTheDocument();
     });
   });
 
@@ -142,8 +140,7 @@ describe("App shell pages", () => {
     expect(screen.queryByText("Issues")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开团队 trex-product" }));
     expect(screen.getByText("Issues")).toBeInTheDocument();
-    expect(screen.getByText("Current")).toBeInTheDocument();
-    expect(screen.getByText("Upcoming")).toBeInTheDocument();
+    expect(screen.getByText("Cycles")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Team settings" })).toBeInTheDocument();
     expect(screen.queryByText("Views")).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Projects" }).length).toBe(1);
@@ -166,7 +163,7 @@ describe("App shell pages", () => {
     expect(screen.getByLabelText("Parent team")).toBeInTheDocument();
   });
 
-  it("shows projects page with create and search only", async () => {
+  it("shows projects page with inline create form", async () => {
     window.history.replaceState({}, "", "/");
 
     render(() => <App />);
@@ -174,8 +171,8 @@ describe("App shell pages", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Projects", level: 1 })).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Project search")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建项目" })).toBeInTheDocument();
+    expect(screen.getByLabelText("项目名称")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建" })).toBeInTheDocument();
     const main = screen.getByRole("heading", { name: "Projects" }).closest(".page-wrap");
     expect(within(main).queryByLabelText("Cycle name")).not.toBeInTheDocument();
     expect(within(main).queryByLabelText("Issue title")).not.toBeInTheDocument();
@@ -202,7 +199,7 @@ describe("App shell pages", () => {
 
     render(() => <App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Workspace 菜单" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Workspace 菜单/ }));
     fireEvent.click(await screen.findByText("切换 Workspace"));
     fireEvent.click(screen.getByRole("radio", { name: "loa" }));
     fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
@@ -219,11 +216,11 @@ describe("App shell pages", () => {
     render(() => <App />);
 
     await screen.findByRole("heading", { name: "Projects", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Workspace 菜单" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace 菜单/ }));
     fireEvent.click(await screen.findByText("新建 Workspace"));
     expect(screen.getByRole("dialog", { name: "新建 Workspace" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Workspace 菜单" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace 菜单/ }));
     fireEvent.click(await screen.findByText("Workspace settings"));
     await waitFor(() => {
       expect(window.location.pathname).toBe("/trex/settings/workspaces");
@@ -259,7 +256,7 @@ describe("App shell pages", () => {
     });
 
     render(() => <App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Workspace 菜单" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Workspace 菜单/ }));
     fireEvent.click(await screen.findByText("Workspace settings"));
     await screen.findByRole("heading", { name: "Workspace settings", level: 1 });
 
