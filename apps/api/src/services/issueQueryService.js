@@ -1,35 +1,60 @@
-const { store } = require("../repositories/memoryStore");
+const { prisma } = require("../repositories/prisma");
+const { buildIssueAccessWhere } = require("./issueWorkspaceScope");
+const { mapIssueToApi } = require("../utils/issueDto");
 
-function queryIssues({ organizationId, status, page = 1, pageSize = 20 }) {
-  let items = store.issues.filter((issue) => issue.organizationId === organizationId);
-  if (status) {
-    items = items.filter((issue) => issue.status === status);
-  }
+async function queryIssues({
+  organizationId,
+  workspaceId = null,
+  status,
+  teamId,
+  page = 1,
+  pageSize = 20
+}) {
+  const baseWhere =
+    workspaceId == null ? { organizationId } : buildIssueAccessWhere(organizationId, workspaceId);
+
+  const where = {
+    ...baseWhere,
+    ...(status ? { status } : {}),
+    ...(teamId ? { teamId } : {})
+  };
 
   const normalizedPage = Number(page) || 1;
   const normalizedPageSize = Number(pageSize) || 20;
-  const start = (normalizedPage - 1) * normalizedPageSize;
-  const pagedItems = items.slice(start, start + normalizedPageSize);
+
+  const [rows, total] = await Promise.all([
+    prisma.issue.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      skip: (normalizedPage - 1) * normalizedPageSize,
+      take: normalizedPageSize
+    }),
+    prisma.issue.count({ where })
+  ]);
 
   return {
-    items: pagedItems,
+    items: rows.map((r) => mapIssueToApi(r)),
     pageInfo: {
       page: normalizedPage,
       pageSize: normalizedPageSize,
-      total: items.length
+      total
     }
   };
 }
 
-function boardIssuesByStatus(organizationId) {
-  const items = store.issues.filter((issue) => issue.organizationId === organizationId);
-  return items.reduce(
+async function boardIssuesByStatus(organizationId, workspaceId = null) {
+  const baseWhere =
+    workspaceId == null ? { organizationId } : buildIssueAccessWhere(organizationId, workspaceId);
+
+  const rows = await prisma.issue.findMany({ where: baseWhere, orderBy: { updatedAt: "desc" } });
+
+  return rows.reduce(
     (acc, issue) => {
       const key = issue.status;
       if (!acc[key]) {
         acc[key] = [];
       }
-      acc[key].push(issue);
+      acc[key].push(mapIssueToApi(issue));
       return acc;
     },
     { todo: [], in_progress: [], in_review: [], done: [] }

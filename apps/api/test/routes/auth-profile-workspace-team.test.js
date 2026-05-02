@@ -27,8 +27,18 @@ test("dingtalk login should provide access to profile workspace and team APIs", 
     .set(auth)
     .send({ name: "Platform Team" });
   assert.equal(teamRes.statusCode, 201);
+  assert.ok(typeof teamRes.body.accentColor === "string");
+  assert.match(teamRes.body.accentColor, /^#[0-9a-f]{6}$/i);
 
   const teamListRes = await request(app).get("/api/teams").set(auth);
   assert.equal(teamListRes.statusCode, 200);
   assert.ok(teamListRes.body.items.some((item) => item.name === "Platform Team"));
+
+  const deleteRes = await request(app).delete(`/api/teams/${teamRes.body.id}`).set(auth);
+  assert.equal(deleteRes.statusCode, 200);
+  assert.equal(deleteRes.body.deleted, true);
+
+  const teamListAfterDeleteRes = await request(app).get("/api/teams").set(auth);
+  assert.equal(teamListAfterDeleteRes.statusCode, 200);
+  assert.ok(teamListAfterDeleteRes.body.items.every((item) => item.id !== teamRes.body.id));
 });

@@ -14,4 +14,5 @@ test("POST /api/projects should create project in organization", async () => {
   assert.equal(res.body.name, "Core Platform");
   assert.equal(res.body.key, "CORE");
   assert.equal(res.body.organizationId, "org-alpha");
+  assert.ok(res.body.workspaceId);
 });

@@ -1,22 +1,36 @@
 const express = require("express");
-const { randomUUID } = require("node:crypto");
-const { store } = require("../repositories/memoryStore");
+const { prisma } = require("../repositories/prisma");
 
 const organizationsRouter = express.Router();
 
-organizationsRouter.post("/", (req, res) => {
+organizationsRouter.post("/", async (req, res) => {
   const { name } = req.body ?? {};
   if (!name) {
     return res.status(400).json({ message: "name is required" });
   }
 
-  const organization = { id: randomUUID(), name };
-  store.organizations.push(organization);
-  return res.status(201).json(organization);
+  const organization = await prisma.organization.create({
+    data: { name }
+  });
+
+  return res.status(201).json({
+    id: organization.id,
+    name: organization.name,
+    createdAt: organization.createdAt.toISOString(),
+    updatedAt: organization.updatedAt.toISOString()
+  });
 });
 
-organizationsRouter.get("/", (_req, res) => {
-  res.json({ items: store.organizations });
+organizationsRouter.get("/", async (_req, res) => {
+  const rows = await prisma.organization.findMany({ orderBy: { createdAt: "desc" } });
+  return res.json({
+    items: rows.map((o) => ({
+      id: o.id,
+      name: o.name,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString()
+    }))
+  });
 });
 
 module.exports = { organizationsRouter };

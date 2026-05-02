@@ -1,17 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { createSignal, onMount } from "solid-js";
 
 export function DingTalkLogin() {
-  const [error, setError] = useState("");
-  const qrcodeRef = useRef(null);
+  const [error, setError] = createSignal("");
+  let qrHost;
   const clientId = import.meta.env.VITE_DINGTALK_CLIENT_ID;
   const redirectUri = `${window.location.origin}/dingtalk/callback`;
 
-  useEffect(() => {
-    if (!clientId || !qrcodeRef.current || !window.DTFrameLogin) {
+  onMount(() => {
+    if (!clientId || !qrHost || !window.DTFrameLogin) {
       return;
     }
-
-    qrcodeRef.current.innerHTML = "";
+    qrHost.innerHTML = "";
     window.DTFrameLogin(
       {
         id: "dingtalk-qrcode",
@@ -33,15 +32,38 @@ export function DingTalkLogin() {
         setError("二维码加载失败，请刷新重试");
       }
     );
-  }, [clientId, redirectUri]);
+  });
 
   return (
-    <section>
-      <h2>钉钉登录</h2>
-      <p>请使用钉钉 App 扫码登录。</p>
-      {!clientId ? <p>未配置 VITE_DINGTALK_CLIENT_ID，无法展示二维码。</p> : null}
-      <div id="dingtalk-qrcode" ref={qrcodeRef} />
-      {error ? <p>{error}</p> : null}
+    <section class="login-card" aria-labelledby="login-heading">
+      <header class="login-card-header">
+        <div class="login-badge" aria-hidden>
+          <span class="login-badge-icon">钉</span>
+          <span>钉钉</span>
+        </div>
+        <h1 id="login-heading" class="login-title">
+          登录 Ordo
+        </h1>
+        <p class="login-lede">使用钉钉 App 扫描下方二维码，安全进入你的工作区。</p>
+        <p class="login-provider-note">钉钉登录</p>
+      </header>
+
+      {!clientId ? (
+        <div class="login-config-missing">
+          <p>
+            未配置 <code>VITE_DINGTALK_CLIENT_ID</code>，无法展示二维码。
+          </p>
+        </div>
+      ) : (
+        <div class="login-qr-wrap">
+          <div class="login-qr-frame">
+            <div id="dingtalk-qrcode" ref={qrHost} class="login-qr-host" />
+          </div>
+          <p class="login-qr-hint">打开钉钉 → 扫一扫</p>
+        </div>
+      )}
+
+      {error() ? <p class="error-text login-error">{error()}</p> : null}
     </section>
   );
 }

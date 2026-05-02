@@ -23,18 +23,28 @@ async function parseDingTalkAccessToken(accessToken) {
   }
 
   const data = await response.json();
-  if (!data?.unionId && !data?.mobile && !data?.staffId) {
+  const union =
+    data?.unionId != null && data.unionId !== ""
+      ? String(data.unionId)
+      : data?.unionid != null && data.unionid !== ""
+        ? String(data.unionid)
+        : "";
+
+  if (!union && !data?.mobile && data?.staffId == null && data?.staff_id == null) {
     return null;
   }
 
+  const primary = data.email != null ? String(data.email).trim() : "";
   const email =
-    data.email ||
-    `${data.staffId || data.unionId || data.mobile || "user"}@dingtalk.local`;
+    primary ||
+    `${data.staffId ?? data.staff_id ?? (union || data.mobile || "dingtalk-user")}@dingtalk.local`;
 
   return {
     email,
     name: data.nick || data.name || email.split("@")[0],
-    picture: data.avatarUrl || null
+    picture: data.avatarUrl || null,
+    dingTalkUnionId: union || null,
+    dingTalkStaffId: data.staffId != null ? String(data.staffId) : data.staff_id != null ? String(data.staff_id) : null
   };
 }
 

@@ -7,101 +7,225 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// 仅用于应用内「组织」列表接口，id 可与 header 中 org 字符串一致或独立 uuid
 model Organization {
-  id        String               @id @default(cuid())
+  id        String   @id @default(uuid())
   name      String
-  createdAt DateTime             @default(now())
-  updatedAt DateTime             @updatedAt
-  projects  Project[]
-  members   OrganizationMember[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id               String   @id @default(uuid())
+  email            String   @unique
+  name             String
+  avatarUrl        String?
+  /// 钉钉 unionId，用于稳定匹配同一钉钉用户（登录即静默注册/合并账号）
+  dingTalkUnionId  String?  @unique
+  dingTalkStaffId  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspacesOwned       Workspace[]       @relation("WorkspaceOwner")
+  workspacesCreated     Workspace[]       @relation("WorkspaceCreator")
+  workspaceMemberships  WorkspaceMember[]
+  preferences           UserPreference[]
+}
+
+model Workspace {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  url            String
+  key            String?
+  ownerUserId    String
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  owner          User                 @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  creator        User                 @relation("WorkspaceCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  members        WorkspaceMember[]
+  teams          Team[]
+  projects       Project[]
+  invites        WorkspaceInvite[]
+  issueCounters  IssueNumberCounter[]
+  cycles         Cycle[]
+  userPreferences UserPreference[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, url])
+}
+
+/// 按用户 + 工作区 + prefKey 存 UI 偏好（如 issue 列表视图）
+model UserPreference {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  prefKey     String
+  payload     Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId, prefKey])
+  @@index([workspaceId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        String
+  invitedBy   String
+  joinedAt    DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model WorkspaceInvite {
+  id          String    @id @default(uuid())
+  workspaceId String
+  role        String
+  status      String
+  token       String    @unique
+  expiresAt   DateTime
+  invitedBy   String
+  createdAt   DateTime  @default(now())
+  acceptedAt  DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Team {
+  id                       String @id @default(uuid())
+  workspaceId              String
+  name                     String
+  identifier               String?
+  accentColor              String?
+  iterationDurationDays    Int? @default(14)
+  cooldownDays             Int? @default(2)
+  /// 迭代统一开始于周几：0=周日 … 6=周六（与 JS Date.getDay 一致）
+  iterationStartWeekday    Int? @default(1)
+  issueLabelsJson          Json?
+  issueStatusesJson        Json?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  issues    Issue[]
+  cycles    Cycle[]
+
+  @@unique([workspaceId, name])
 }
 
 model Project {
-  id             String          @id @default(cuid())
+  id             String   @id @default(uuid())
   organizationId String
+  workspaceId    String
   name           String
   key            String
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  cycles         Cycle[]
-  issues         Issue[]
-  members        ProjectMember[]
-  issueCounter   ProjectIssueCounter?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  @@unique([organizationId, key])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  issues    Issue[]
+  cycles    Cycle[]
+
+  @@unique([workspaceId, key])
 }
 
 model Cycle {
-  id             String   @id @default(cuid())
+  id             String    @id @default(uuid())
   organizationId String
-  projectId      String
+  workspaceId    String
+  teamId         String?
+  projectId      String?
   name           String
   startsAt       DateTime
   endsAt         DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status         String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 }
 
 model Issue {
-  id             String         @id @default(cuid())
-  organizationId String
-  projectId      String
-  cycleId        String?
-  title          String
-  description    String?
-  status         String         @default("todo")
-  priority       Int            @default(0)
-  issueNumber    Int
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  comments       IssueComment[]
+  id                  String    @id @default(uuid())
+  organizationId      String
+  workspaceId         String
+  teamId              String?
+  projectId           String
+  cycleId             String?
+  title               String
+  description         String?
+  status              String    @default("todo")
+  priority            Int       @default(0)
+  type                String    @default("feature")
+  estimateHours       Float?
+  assigneeId          String?
+  labels              String[]  @default([])
+  dueDate             DateTime?
+  displayIdentifier   String?
+  numberScope         String
+  issueNumber         Int
+  /// 可读键：COR-42，与工作区内唯一约束配合用于路由与面包屑
+  issuesId            String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  @@unique([projectId, issueNumber])
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  team      Team?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  comments  IssueComment[]
+  activities IssueActivity[]
+
+  @@unique([workspaceId, numberScope, issueNumber])
+  @@unique([workspaceId, issuesId])
   @@index([organizationId, status])
+  @@index([workspaceId, teamId])
 }
 
 model IssueComment {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid())
   organizationId String
   issueId        String
   body           String
+  userId         String
   createdAt      DateTime @default(now())
-  issue          Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, issueId])
 }
 
-model OrganizationMember {
-  id             String       @id @default(cuid())
-  organizationId String
-  userId         String
-  role           String       @default("member")
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, userId])
-  @@index([organizationId, role])
-}
-
-model ProjectMember {
-  id        String   @id @default(cuid())
-  projectId String
-  userId    String
-  role      String   @default("member")
+model IssueActivity {
+  id        String   @id @default(uuid())
+  issueId   String
+  type      String
+  userId    String?
+  payload   Json?
   createdAt DateTime @default(now())
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, userId])
-  @@index([projectId, role])
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId, createdAt])
 }
 
-model ProjectIssueCounter {
-  id        String   @id @default(cuid())
-  projectId String   @unique
-  current   Int      @default(0)
-  updatedAt DateTime @updatedAt
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+/// 与内存中 counterKey 一致：如 identifier:ENG 或 project:<projectId>
+model IssueNumberCounter {
+  id          String   @id @default(cuid())
+  workspaceId String
+  scopeKey    String
+  current     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, scopeKey])
 }

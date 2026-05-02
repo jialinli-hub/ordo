@@ -1,11 +1,13 @@
-const { store } = require("../repositories/memoryStore");
+const { prisma } = require("../repositories/prisma");
 
-function closeExpiredCycles(now = new Date()) {
-  for (const cycle of store.cycles) {
-    if (cycle.status === "active" && new Date(cycle.endsAt) < now) {
-      cycle.status = "closed";
-    }
-  }
+async function closeExpiredCycles(now = new Date()) {
+  await prisma.cycle.updateMany({
+    where: {
+      status: "active",
+      endsAt: { lt: now }
+    },
+    data: { status: "closed", updatedAt: now }
+  });
 }
 
 module.exports = { closeExpiredCycles };
