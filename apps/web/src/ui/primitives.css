@@ -10,28 +10,81 @@
   padding: 0 10px;
   min-height: 28px;
   border-radius: 6px;
-  border: 1px solid var(--border, #e4e4e7);
-  background: var(--surface, #fff);
-  color: var(--text, #4b4338);
+  border: 1px solid var(--btn-border, color-mix(in srgb, var(--accent, #ff6b35) 26%, var(--border, #e4e4e7)));
+  background: var(--btn-bg, color-mix(in srgb, var(--accent-alt, #1b2a49) 92%, #fff));
+  color: var(--btn-text, #fff);
   cursor: pointer;
+  box-shadow: none;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.btn-ordo:hover:not(:disabled) {
+  background: var(--btn-bg-hover, color-mix(in srgb, var(--accent, #f59e0b) 14%, var(--surface, #fff)));
+  border-color: var(--btn-border-hover, color-mix(in srgb, var(--accent, #f59e0b) 34%, var(--border, #e4e4e7)));
+}
+.btn-ordo:active:not(:disabled) {
+  transform: translateY(0.5px);
 }
 .btn-ordo:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* 保存 / 提交 / 发送（:root 定义 --btn-save-*） */
+.btn-ordo-save,
 .btn-ordo-primary {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent, #5e6ad2) 92%, #000) 0%, var(--accent, #5e6ad2) 100%);
-  border-color: color-mix(in srgb, var(--accent, #5e6ad2) 78%, #18181b);
-  color: #fafafa;
+  background: var(--btn-save-bg2, var(--btn-primary-bg2, #263238));
+  border-color: var(--btn-save-border, var(--btn-primary-border, color-mix(in srgb, #263238 48%, #e7e5e4)));
+  color: var(--btn-save-text, var(--btn-primary-text, #ffffff));
+}
+.btn-ordo-save:hover:not(:disabled),
+.btn-ordo-primary:hover:not(:disabled) {
+  background: var(--btn-save-bg2-hover, var(--btn-primary-bg2-hover, color-mix(in srgb, #263238 90%, #000)));
+}
+
+/* 新建 / 唤起弹窗：明度介于保存与默认之间 */
+.btn-ordo-create {
+  background: var(--btn-create-bg2, color-mix(in srgb, #63b8a7 54%, #263238));
+  border-color: var(--btn-create-border, color-mix(in srgb, #63b8a7 36%, #263238));
+  color: var(--btn-create-text, #fff);
+}
+.btn-ordo-create:hover:not(:disabled) {
+  background: var(--btn-create-bg2-hover, color-mix(in srgb, #63b8a7 44%, #263238));
+}
+
+/* 分段控件选中态（非保存/新建语义） */
+.btn-ordo-pressed {
+  background: color-mix(in srgb, #ffffff 10%, var(--surface, #17171c));
+  border-color: var(--border, #2a2a31);
+  color: var(--text, #ececf1);
+  font-weight: 600;
+}
+.btn-ordo-pressed:hover:not(:disabled) {
+  background: color-mix(in srgb, #ffffff 14%, var(--surface, #17171c));
+}
+
+/* 破坏性确认：仅使用色板 #263238（描边 + 字色，与白底区分于 save 实心） */
+.btn-ordo-danger {
+  background: var(--surface, #fff);
+  border-width: 2px;
+  border-style: solid;
+  border-color: color-mix(in srgb, #263238 42%, var(--border, #e4e4e7));
+  color: #263238;
+}
+.btn-ordo-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #263238 10%, var(--surface, #fff));
+  border-color: #263238;
 }
 .btn-ordo-text {
   border-color: transparent;
-  background: transparent;
+  background: var(--btn-text-bg, color-mix(in srgb, var(--accent-alt, #1b2a49) 88%, transparent));
   padding: 4px 6px;
   min-height: 24px;
+  color: var(--btn-text-link, #fff);
+}
+.btn-ordo-text:hover:not(:disabled) {
+  background: var(--btn-text-hover-bg, color-mix(in srgb, var(--accent, #f59e0b) 12%, transparent));
 }
 .btn-ordo-danger-text {
-  color: #b54747;
+  color: color-mix(in srgb, #fca5a5 92%, var(--text, #ececf1));
 }
 
 .inp-ordo {
@@ -39,9 +92,10 @@
   font-size: 12px;
   padding: 4px 8px;
   min-height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border, #e4e4e7);
-  background: var(--surface, #fff);
+  border-radius: 10px;
+  border: 1px solid var(--border, #2a2a31);
+  background: var(--surface, #17171c);
+  color: var(--text, #ececf1);
   width: 100%;
   box-sizing: border-box;
 }
@@ -59,9 +113,10 @@ textarea.inp-ordo {
   font-size: 12px;
   padding: 2px 6px;
   min-height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border, #e4e4e7);
-  background: var(--surface, #fff);
+  border-radius: 10px;
+  border: 1px solid var(--border, #2a2a31);
+  background: var(--surface, #17171c);
+  color: var(--text, #ececf1);
   max-width: 100%;
 }
 .sel-ordo.fullw,
@@ -74,7 +129,7 @@ textarea.inp-ordo {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(22, 15, 8, 0.38);
+  background: rgba(6, 8, 12, 0.62);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -83,22 +138,53 @@ textarea.inp-ordo {
 }
 
 .oro-modal {
+  /* 深色弹层内外按钮与同壳层 token */
+  --btn-bg: color-mix(in srgb, #ffffff 10%, var(--surface-elevated, #1d1d22));
+  --btn-bg-hover: color-mix(in srgb, var(--accent, #65e8d4) 12%, color-mix(in srgb, #ffffff 14%, var(--surface-elevated, #1d1d22)));
+  --btn-border: var(--border, #2a2a31);
+  --btn-border-hover: color-mix(in srgb, var(--accent, #65e8d4) 38%, var(--border, #2a2a31));
+  --btn-text: var(--text, #ececf1);
+
+  --btn-save-bg1: color-mix(in srgb, #263238 24%, #fff);
+  --btn-save-bg2: #263238;
+  --btn-save-bg1-hover: color-mix(in srgb, #263238 34%, #fff);
+  --btn-save-bg2-hover: color-mix(in srgb, #263238 90%, #000);
+  --btn-save-border: color-mix(in srgb, #263238 48%, #c5d0d8);
+  --btn-save-text: #ffffff;
+  --btn-primary-bg1: var(--btn-save-bg1);
+  --btn-primary-bg2: var(--btn-save-bg2);
+  --btn-primary-bg1-hover: var(--btn-save-bg1-hover);
+  --btn-primary-bg2-hover: var(--btn-save-bg2-hover);
+  --btn-primary-border: var(--btn-save-border);
+  --btn-primary-text: var(--btn-save-text);
+
+  --btn-text-link: var(--accent, #65e8d4);
+  --btn-text-bg: color-mix(in srgb, var(--accent, #65e8d4) 12%, transparent);
+  --btn-text-hover-bg: color-mix(in srgb, var(--accent, #65e8d4) 20%, transparent);
   position: relative;
   z-index: 1001;
   min-width: min(440px, 92vw);
   max-width: 96vw;
   max-height: 90vh;
   overflow: auto;
-  background: var(--surface-elevated, #fffdfb);
-  border: 1px solid var(--border, #e4e4e7);
-  border-radius: 12px;
+  background: var(--surface-elevated, #1d1d22);
+  border: 1px solid var(--border, #2a2a31);
+  border-radius: var(--radius-lg, 18px);
   box-shadow:
-    0 18px 50px rgb(52 43 34 / 0.18),
-    0 0 0 1px rgb(255 255 255 / 0.06) inset;
+    0 22px 56px rgb(0 0 0 / 0.5),
+    0 0 0 1px rgb(255 255 255 / 0.04) inset;
 }
 
 .oro-modal-wide {
   min-width: min(680px, 96vw);
+}
+
+/* 创建 Cycle：随内容变宽，避免窄列网格挤压 */
+.oro-modal-cycle-create {
+  min-width: min(360px, 92vw);
+  max-width: min(720px, 96vw);
+  width: auto;
+  max-height: min(94vh, 960px);
 }
 
 .oro-modal-hd {
@@ -107,17 +193,19 @@ textarea.inp-ordo {
   justify-content: space-between;
   gap: 8px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--hairline-1, rgb(236 226 212 / 0.75));
+  border-bottom: 1px solid var(--border, #2a2a31);
 }
 
 .oro-modal-hd-title {
   margin: 0;
   font-size: 14px;
   font-weight: 650;
+  color: var(--text, #ececf1);
 }
 
 .oro-modal-bd {
   padding: 16px;
+  color: var(--text, #ececf1);
 }
 
 .oro-modal-ft {
@@ -125,7 +213,7 @@ textarea.inp-ordo {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--hairline-1, rgb(236 226 212 / 0.75));
+  border-top: 1px solid var(--border, #2a2a31);
 }
 
 .inp-addon-wrap {
@@ -154,12 +242,12 @@ textarea.inp-ordo {
   left: 0;
   min-width: 200px;
   z-index: 50;
-  background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #e4e4e7);
-  border-radius: 10px;
+  background: var(--surface-elevated, #1d1d22);
+  border: 1px solid var(--border, #2a2a31);
+  border-radius: 12px;
   box-shadow:
-    0 12px 32px rgb(52 43 34 / 0.12),
-    0 0 0 1px rgb(236 226 212 / 0.45) inset;
+    0 16px 40px rgb(0 0 0 / 0.45),
+    0 0 0 1px rgb(255 255 255 / 0.04) inset;
   padding: 6px;
 }
 .workspace-menu-popup button {
@@ -173,10 +261,10 @@ textarea.inp-ordo {
   font-size: 12px;
   padding: 8px 10px;
   border-radius: 6px;
-  color: inherit;
+  color: var(--text, #ececf1);
 }
 .workspace-menu-popup button:hover {
-  background: color-mix(in srgb, var(--accent, #5e6ad2) 12%, transparent);
+  background: color-mix(in srgb, var(--accent, #65e8d4) 14%, transparent);
 }
 
 .oro-dropdown-wrap {
@@ -189,10 +277,10 @@ textarea.inp-ordo {
   right: 0;
   z-index: 60;
   min-width: 160px;
-  background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #e4e4e7);
+  background: var(--surface-elevated, #1d1d22);
+  border: 1px solid var(--border, #2a2a31);
   border-radius: 10px;
-  box-shadow: 0 10px 28px rgb(52 43 34 / 0.12);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.42);
   padding: 6px;
   list-style: none;
   margin: 0;
@@ -213,7 +301,7 @@ textarea.inp-ordo {
   color: inherit;
 }
 .oro-dropdown-panel button:hover {
-  background: color-mix(in srgb, var(--accent, #5e6ad2) 10%, transparent);
+  background: color-mix(in srgb, var(--accent, #65e8d4) 12%, transparent);
 }
 .oro-dropdown-panel button[data-danger="1"] {
   color: #b54747;
@@ -226,11 +314,11 @@ textarea.inp-ordo {
   position: absolute;
   z-index: 70;
   top: calc(100% + 6px);
-  background: var(--surface-elevated, #fff);
-  border: 1px solid var(--border, #e4e4e7);
+  background: var(--surface-elevated, #1d1d22);
+  border: 1px solid var(--border, #2a2a31);
   border-radius: 10px;
   padding: 10px;
-  box-shadow: 0 12px 32px rgb(52 43 34 / 0.12);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.42);
 }
 .oro-pop-flyout.pop-br {
   right: 0;
@@ -255,7 +343,7 @@ textarea.inp-ordo {
   width: 32px;
   height: 18px;
   border-radius: 999px;
-  background: var(--muted-bg, #e8dfd3);
+  background: var(--muted-bg, #3a3a44);
   position: relative;
   transition: background 0.15s ease;
 }
@@ -285,9 +373,9 @@ textarea.inp-ordo {
   padding: 0 6px;
   height: 20px;
   border-radius: 6px;
-  border: 1px solid rgb(236 226 212 / 0.9);
-  background: rgb(250 250 250 / 0.95);
-  color: var(--text-soft, #a1a1aa);
+  border: 1px solid var(--border, #2a2a31);
+  background: color-mix(in srgb, #ffffff 9%, var(--surface, #17171c));
+  color: var(--text-soft, #737384);
 }
 
 .oro-tag-processing {

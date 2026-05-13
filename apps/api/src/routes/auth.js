@@ -131,6 +131,14 @@ async function exchangeCodeForAccessToken(authCode, redirectUri = process.env.DI
     return null;
   }
   const data = await response.json();
+  const logPayload = { ...data };
+  if (logPayload.accessToken) {
+    logPayload.accessToken = `[redacted len=${String(logPayload.accessToken).length}]`;
+  }
+  if (logPayload.refreshToken) {
+    logPayload.refreshToken = "[redacted]";
+  }
+  console.log("[dingtalk] oauth2/userAccessToken 响应体", logPayload);
   console.log("[dingtalk] exchange token success", {
     hasAccessToken: Boolean(data.accessToken),
     expireIn: data.expireIn,

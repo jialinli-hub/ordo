@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
@@ -66,4 +67,52 @@ test("workspace invite should return shareable 7-day link and accept invite", as
 
   const inviteRowFinal = await prisma.workspaceInvite.findUnique({ where: { token } });
   assert.equal(inviteRowFinal.status, "pending");
+});
+
+test("GET /api/workspace-invites/preview succeeds without Authorization", async () => {
+  const loginRes = await request(app)
+    .post("/api/auth/dingtalk")
+    .send({ idToken: "dev-dingtalk:previewowner@example.com" });
+
+  assert.equal(loginRes.statusCode, 200);
+  const auth = { Authorization: `Bearer ${loginRes.body.accessToken}` };
+  const workspaceId = loginRes.body.workspace.id;
+
+  const teamRes = await request(app).post("/api/teams").set(auth).send({ name: "Preview Squad" });
+  assert.equal(teamRes.statusCode, 201);
+  const teamId = teamRes.body.id;
+
+  const inviteRes = await request(app)
+    .post(`/api/workspaces/${workspaceId}/invites`)
+    .set(auth)
+    .send({ role: "member", contextTeamId: teamId });
+
+  assert.equal(inviteRes.statusCode, 201);
+  assert.ok(String(inviteRes.body.inviteLink || "").includes("team="));
+  const token = inviteRes.body.token;
+
+  const previewRes = await request(app).get(`/api/workspace-invites/preview?token=${encodeURIComponent(token)}`);
+
+  assert.equal(previewRes.statusCode, 200);
+  assert.equal(previewRes.body.workspace?.id, workspaceId);
+  assert.ok(previewRes.body.workspace?.name);
+  assert.equal(previewRes.body.team?.id, teamId);
+  assert.ok(previewRes.body.team?.name);
+});
+
+test("POST /api/workspaces/:workspaceId/invites rejects alien contextTeamId", async () => {
+  const loginRes = await request(app)
+    .post("/api/auth/dingtalk")
+    .send({ idToken: "dev-dingtalk:alienctx@example.com" });
+
+  assert.equal(loginRes.statusCode, 200);
+  const auth = { Authorization: `Bearer ${loginRes.body.accessToken}` };
+  const workspaceId = loginRes.body.workspace.id;
+
+  const inviteRes = await request(app)
+    .post(`/api/workspaces/${workspaceId}/invites`)
+    .set(auth)
+    .send({ role: "member", contextTeamId: randomUUID() });
+
+  assert.equal(inviteRes.statusCode, 422);
 });

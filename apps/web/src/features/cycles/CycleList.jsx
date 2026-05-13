@@ -1,7 +1,26 @@
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
-import { Btn, Inp, Modal, TagSpan } from "../../ui/primitives.jsx";
-import { apiGet, apiPost } from "../../api/client";
+import { For, Index, Show, createEffect, createMemo, createSignal, on, onMount, untrack } from "solid-js";
+import { Btn, Inp, Modal, Sel, TagSpan } from "../../ui/primitives.jsx";
+import { apiGet, apiPatch, apiPost } from "../../api/client";
 import { GROUP_ORDER, STATUS_META, TYPE_LABEL } from "../issues/issueUi";
+
+/** `<input type="date">` 值为 YYYY-MM-DD 时，按本地日历日 0 点 / 当日最后一刻 转 ISO，避免 `new Date("YYYY-MM-DD")` 被当作 UTC 午夜导致与国内时区错位 */
+function dateInputToLocalDayStartIso(dateStr) {
+  const s = String(dateStr || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map((x) => Number(x));
+    return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+  }
+  return new Date(dateStr).toISOString();
+}
+
+function dateInputToLocalDayEndIso(dateStr) {
+  const s = String(dateStr || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map((x) => Number(x));
+    return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+  }
+  return new Date(dateStr).toISOString();
+}
 
 function formatCycleRange(startsAt, endsAt) {
   const s = new Date(startsAt);
@@ -50,6 +69,114 @@ const TYPE_LABEL_ZH = {
   chore: "事务"
 };
 
+const CYCLE_KIND_OPTIONS = [
+  { value: "daily", label: "日常迭代" },
+  { value: "project", label: "项目迭代" }
+];
+
+const RELEASE_COND_STATUS_OPTIONS = [
+  { value: "pending", label: "待完成" },
+  { value: "done", label: "已完成" }
+];
+
+/** 迭代卡片内：发布条件 + 每条状态下拉，失焦或改状态即 PATCH。
+ *  禁止在 createEffect 中跟随 props.initial / 服务端 updatedAt 同步 rows：同一张卡片上改迭代类型、日期等任意 PATCH 都会刷新 updatedAt，若据此重置 rows 会覆盖正在输入的文案（表现为「一次只能输一个字符」）。仅当切换到另一条 cycle（cycleId 变化）时再从 props 拉取。列表行用 `<Index>` 稳定 DOM，避免受控输入在每次 setRows 后被整表重建。 */
+function CycleReleaseConditionsBlock(props) {
+  const [rows, setRows] = createSignal([{ text: "", status: "pending" }]);
+
+  function applyInitialFromProps() {
+    const init = untrack(() => props.initial);
+    if (!Array.isArray(init) || init.length === 0) {
+      setRows([{ text: "", status: "pending" }]);
+    } else {
+      setRows(
+        init.map((x) => ({
+          text: String(x?.text ?? ""),
+          status: x?.status === "done" ? "done" : "pending"
+        }))
+      );
+    }
+  }
+
+  createEffect(
+    on(
+      () => props.cycleId,
+      () => {
+        applyInitialFromProps();
+      }
+    )
+  );
+
+  async function commit(nextRows) {
+    const cleaned = nextRows
+      .map((r) => ({ text: r.text.trim(), status: r.status === "done" ? "done" : "pending" }))
+      .filter((r) => r.text !== "");
+    await props.onSave(cleaned);
+    if (cleaned.length === 0) {
+      setRows([{ text: "", status: "pending" }]);
+    } else {
+      setRows(cleaned.map((c) => ({ text: c.text, status: c.status })));
+    }
+  }
+
+  return (
+    <div class="cycle-release-conds">
+      <span class="cycle-meta-kicker muted">发布条件</span>
+      <Index each={rows()}>
+        {(row, index) => (
+          <div class="cycle-release-cond-row">
+            <Inp
+              class="cycle-release-cond-text"
+              placeholder="例如：主干回归通过"
+              value={row().text}
+              onInput={(e) => {
+                const v = e.target.value;
+                setRows((prev) => prev.map((r, j) => (j === index ? { ...r, text: v } : r)));
+              }}
+              onBlur={() => commit(rows())}
+              aria-label={`发布条件 ${index + 1}`}
+            />
+            <Sel
+              class="cycle-release-cond-status"
+              value={row().status}
+              options={RELEASE_COND_STATUS_OPTIONS}
+              onChange={async (v) => {
+                const st = v === "done" ? "done" : "pending";
+                const next = rows().map((r, j) => (j === index ? { ...r, status: st } : r));
+                setRows(next);
+                await commit(next);
+              }}
+              aria-label={`发布条件 ${index + 1} 状态`}
+            />
+            <Btn
+              type="button"
+              variant="text"
+              class="cycle-release-cond-remove"
+              aria-label="移除此条件"
+              onClick={async () => {
+                const next = rows().filter((_, j) => j !== index);
+                const final = next.length ? next : [{ text: "", status: "pending" }];
+                setRows(final);
+                await commit(final);
+              }}
+            >
+              移除
+            </Btn>
+          </div>
+        )}
+      </Index>
+      <Btn
+        type="button"
+        variant="text"
+        class="cycle-release-cond-add"
+        onClick={() => setRows((prev) => [...prev, { text: "", status: "pending" }])}
+      >
+        添加条件
+      </Btn>
+    </div>
+  );
+}
+
 function statusCountFromSummary(summary, key) {
   if (summary?.byStatus && typeof summary.byStatus[key] === "number") {
     return summary.byStatus[key];
@@ -77,6 +204,29 @@ function rowIssueProgress(item) {
   return { done, total, pct };
 }
 
+function CycleDocUrlField(props) {
+  const [draft, setDraft] = createSignal(props.value ?? "");
+  createEffect(() => {
+    setDraft(props.value ?? "");
+  });
+  return (
+    <Inp
+      class="cycle-doc-url-input"
+      placeholder={props.placeholder}
+      value={draft()}
+      onInput={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const v = draft().trim();
+        const prev = String(props.value ?? "").trim();
+        if (v !== prev) {
+          props.onSave?.(v);
+        }
+      }}
+      aria-label={props["aria-label"]}
+    />
+  );
+}
+
 export function CycleList(props) {
   const cycleView = () => props.cycleView ?? "all";
   const title = () => props.title ?? "Cycles";
@@ -84,11 +234,17 @@ export function CycleList(props) {
 
   const [items, setItems] = createSignal([]);
   const [name, setName] = createSignal("");
+  const [createKind, setCreateKind] = createSignal("daily");
   const [startsAt, setStartsAt] = createSignal("");
   const [endsAt, setEndsAt] = createSignal("");
+  const [plannedTestAtCreate, setPlannedTestAtCreate] = createSignal("");
+  const [releaseAtCreate, setReleaseAtCreate] = createSignal("");
+  const [productDocCreate, setProductDocCreate] = createSignal("");
+  const [designDocCreate, setDesignDocCreate] = createSignal("");
+  const [uiDocCreate, setUiDocCreate] = createSignal("");
+  const [createReleaseConds, setCreateReleaseConds] = createSignal([{ text: "", status: "pending" }]);
   const [error, setError] = createSignal("");
   const [createOpen, setCreateOpen] = createSignal(false);
-  const [epicDraft, setEpicDraft] = createSignal({});
 
   let refreshSeq = 0;
 
@@ -122,6 +278,19 @@ export function CycleList(props) {
     });
   });
 
+  function resetCreateForm() {
+    setName("");
+    setCreateKind("daily");
+    setStartsAt("");
+    setEndsAt("");
+    setPlannedTestAtCreate("");
+    setReleaseAtCreate("");
+    setProductDocCreate("");
+    setDesignDocCreate("");
+    setUiDocCreate("");
+    setCreateReleaseConds([{ text: "", status: "pending" }]);
+  }
+
   async function handleCreateCycle(event) {
     event?.preventDefault?.();
     if (!name() || !startsAt() || !endsAt()) {
@@ -130,35 +299,61 @@ export function CycleList(props) {
     }
     setError("");
     try {
-      await apiPost("/api/cycles", {
-        teamId: teamId(),
-        name: name(),
-        startsAt: new Date(startsAt()).toISOString(),
-        endsAt: new Date(endsAt()).toISOString()
-      });
-      setName("");
-      setStartsAt("");
-      setEndsAt("");
+      const body = {
+        name: name().trim(),
+        kind: createKind(),
+        startsAt: dateInputToLocalDayStartIso(startsAt()),
+        endsAt: dateInputToLocalDayEndIso(endsAt())
+      };
+      const tid = teamId();
+      if (tid) {
+        body.teamId = tid;
+      }
+      const pt = plannedTestAtCreate().trim();
+      if (pt) {
+        body.plannedTestAt = pt;
+      }
+      const rel = releaseAtCreate().trim();
+      if (rel) {
+        body.releaseAt = rel;
+      }
+      if (createKind() === "project") {
+        const p = productDocCreate().trim();
+        const d = designDocCreate().trim();
+        const u = uiDocCreate().trim();
+        if (p) body.productDocUrl = p;
+        if (d) body.designDocUrl = d;
+        if (u) body.uiDocUrl = u;
+      }
+      const rc = createReleaseConds()
+        .map((r) => ({
+          text: String(r.text ?? "").trim(),
+          status: r.status === "done" ? "done" : "pending"
+        }))
+        .filter((r) => r.text !== "");
+      if (rc.length) {
+        body.releaseConditions = rc;
+      }
+      await apiPost("/api/cycles", body);
+      resetCreateForm();
       setCreateOpen(false);
       await refreshList();
-    } catch {
-      setError("创建 Cycle 失败");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "创建 Cycle 失败");
     }
   }
 
-  async function handleAddEpic(cycleId) {
-    const key = cycleId;
-    const raw = (epicDraft()[key] ?? "").trim();
-    if (!raw) {
-      return;
-    }
-    setError("");
+  function dateIsoToInput(iso) {
+    if (!iso) return "";
+    return String(iso).slice(0, 10);
+  }
+
+  async function patchCycle(cycleId, partial) {
     try {
-      await apiPost(`/api/cycles/${encodeURIComponent(cycleId)}/epics`, { name: raw });
-      setEpicDraft((prev) => ({ ...prev, [key]: "" }));
+      await apiPatch(`/api/cycles/${encodeURIComponent(cycleId)}`, partial);
       await refreshList();
-    } catch {
-      setError("添加大需求失败");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "更新迭代失败");
     }
   }
 
@@ -186,7 +381,7 @@ export function CycleList(props) {
     <section class="cycle-panel surface-card">
       <div class="cycle-header-row">
         <h2 class="panel-title cycle-page-title">{title()}</h2>
-        <Btn variant="primary" onClick={() => setCreateOpen(true)}>
+        <Btn variant="create" onClick={() => setCreateOpen(true)}>
           创建 Cycle
         </Btn>
       </div>
@@ -200,9 +395,14 @@ export function CycleList(props) {
               <div class="cycle-row-col cycle-row-col--name">
                 <div class="cycle-row-nameblock">
                   <strong class="cycle-row-name">{item.name}</strong>
-                  <TagSpan color={statusTagColor(computeCycleStatus(item.startsAt, item.endsAt))}>
-                    {statusLabel(computeCycleStatus(item.startsAt, item.endsAt))}
-                  </TagSpan>
+                  <div class="cycle-row-tags">
+                    <TagSpan color={statusTagColor(computeCycleStatus(item.startsAt, item.endsAt))}>
+                      {statusLabel(computeCycleStatus(item.startsAt, item.endsAt))}
+                    </TagSpan>
+                    <TagSpan color={item.kind === "project" ? "processing" : "default"}>
+                      {item.kind === "project" ? "项目迭代" : "日常迭代"}
+                    </TagSpan>
+                  </div>
                 </div>
               </div>
               <div class="cycle-row-col cycle-row-col--stats">
@@ -231,37 +431,68 @@ export function CycleList(props) {
                   </div>
                 </div>
               </div>
-              <div class="cycle-row-col cycle-row-col--epics">
-                <div class="cycle-epics-block cycle-epics-block--rail">
-                  <span class="cycle-epics-label">大需求</span>
-                  <div class="cycle-epics-chips">
-                    <For each={item.epics ?? []}>
-                      {(ep) => <span class="cycle-epic-chip">{ep.name}</span>}
-                    </For>
-                    <Show when={!item.epics?.length}>
-                      <span class="muted cycle-epics-empty">暂无</span>
-                    </Show>
-                  </div>
-                  <div class="cycle-epic-add">
-                    <Inp
-                      aria-label={`大需求名称 ${item.name}`}
-                      class="cycle-epic-add-input"
-                      placeholder="输入大需求名称"
-                      value={epicDraft()[item.id] ?? ""}
-                      onInput={(e) =>
-                        setEpicDraft((prev) => ({ ...prev, [item.id]: e.target.value }))
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddEpic(item.id);
+              <div class="cycle-row-col cycle-row-col--meta">
+                <div class="cycle-meta-block">
+                  <span class="cycle-meta-kicker muted">迭代类型</span>
+                  <Sel
+                    class="cycle-kind-select"
+                    aria-label={`迭代类型 ${item.name}`}
+                    value={item.kind === "project" ? "project" : "daily"}
+                    options={CYCLE_KIND_OPTIONS}
+                    onChange={(v) => patchCycle(item.id, { kind: v || "daily" })}
+                  />
+                  <div class="cycle-meta-dates">
+                    <label class="cycle-meta-date-field">
+                      <span class="muted">提测</span>
+                      <Inp
+                        type="date"
+                        value={dateIsoToInput(item.plannedTestAt)}
+                        aria-label={`提测日期 ${item.name}`}
+                        onBlur={(e) =>
+                          patchCycle(item.id, { plannedTestAt: e.target.value || "" })
                         }
-                      }}
-                    />
-                    <Btn type="button" variant="default" onClick={() => handleAddEpic(item.id)}>
-                      添加
-                    </Btn>
+                      />
+                    </label>
+                    <label class="cycle-meta-date-field">
+                      <span class="muted">发布</span>
+                      <Inp
+                        type="date"
+                        value={dateIsoToInput(item.releaseAt)}
+                        aria-label={`发布日期 ${item.name}`}
+                        onBlur={(e) =>
+                          patchCycle(item.id, { releaseAt: e.target.value || "" })
+                        }
+                      />
+                    </label>
                   </div>
+                  <CycleReleaseConditionsBlock
+                    cycleId={item.id}
+                    initial={item.releaseConditions}
+                    onSave={(cleaned) => patchCycle(item.id, { releaseConditions: cleaned })}
+                  />
+                  <Show when={item.kind === "project"}>
+                    <div class="cycle-meta-docs">
+                      <span class="cycle-meta-kicker muted">文档链接</span>
+                      <CycleDocUrlField
+                        placeholder="产品文档 URL"
+                        value={item.productDocUrl}
+                        aria-label={`产品文档 ${item.name}`}
+                        onSave={(v) => patchCycle(item.id, { productDocUrl: v || "" })}
+                      />
+                      <CycleDocUrlField
+                        placeholder="设计文档 URL"
+                        value={item.designDocUrl}
+                        aria-label={`设计文档 ${item.name}`}
+                        onSave={(v) => patchCycle(item.id, { designDocUrl: v || "" })}
+                      />
+                      <CycleDocUrlField
+                        placeholder="UI 文档 URL"
+                        value={item.uiDocUrl}
+                        aria-label={`UI 文档 ${item.name}`}
+                        onSave={(v) => patchCycle(item.id, { uiDocUrl: v || "" })}
+                      />
+                    </div>
+                  </Show>
                 </div>
               </div>
             </div>
@@ -351,39 +582,196 @@ export function CycleList(props) {
       </ul>
 
       <Modal
+        class="oro-modal-cycle-create"
         open={createOpen()}
         title="创建 Cycle"
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setCreateOpen(false);
+          resetCreateForm();
+        }}
         footer={
           <>
-            <Btn variant="default" onClick={() => setCreateOpen(false)}>
+            <Btn
+              variant="default"
+              onClick={() => {
+                setCreateOpen(false);
+                resetCreateForm();
+              }}
+            >
               取消
             </Btn>
-            <Btn variant="primary" onClick={(e) => handleCreateCycle(e)}>
+            <Btn variant="create" onClick={(e) => handleCreateCycle(e)}>
               创建
             </Btn>
           </>
         }
       >
-        <form class="cycle-form" onSubmit={handleCreateCycle}>
-          <Inp
-            aria-label="Cycle name"
-            placeholder="Cycle 名称"
-            value={name()}
-            onInput={(event) => setName(event.target.value)}
-          />
-          <Inp
-            aria-label="Cycle startsAt"
-            type="date"
-            value={startsAt()}
-            onInput={(event) => setStartsAt(event.target.value)}
-          />
-          <Inp
-            aria-label="Cycle endsAt"
-            type="date"
-            value={endsAt()}
-            onInput={(event) => setEndsAt(event.target.value)}
-          />
+        <form class="cycle-form cycle-form-create" onSubmit={handleCreateCycle}>
+          <div class="cycle-form-field">
+            <label class="cycle-form-label" for="cycle-create-name">
+              迭代名称
+            </label>
+            <Inp
+              id="cycle-create-name"
+              placeholder="例如 Sprint 12"
+              value={name()}
+              onInput={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div class="cycle-form-field">
+            <label class="cycle-form-label" for="cycle-create-kind">
+              迭代类型
+            </label>
+            <Sel
+              id="cycle-create-kind"
+              value={createKind()}
+              options={CYCLE_KIND_OPTIONS}
+              onChange={(v) => setCreateKind(v || "daily")}
+            />
+          </div>
+          <div class="cycle-form-field cycle-form-field--span">
+            <span class="cycle-form-label">迭代周期（起止）</span>
+            <div class="cycle-form-row-dates">
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-starts">
+                  开始日期
+                </label>
+                <Inp
+                  id="cycle-create-starts"
+                  type="date"
+                  value={startsAt()}
+                  onInput={(event) => setStartsAt(event.target.value)}
+                />
+              </div>
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-ends">
+                  结束日期
+                </label>
+                <Inp
+                  id="cycle-create-ends"
+                  type="date"
+                  value={endsAt()}
+                  onInput={(event) => setEndsAt(event.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <div class="cycle-form-field cycle-form-field--span">
+            <span class="cycle-form-label">里程碑（可选）</span>
+            <div class="cycle-form-row-dates">
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-test">
+                  提测日期
+                </label>
+                <Inp
+                  id="cycle-create-test"
+                  type="date"
+                  value={plannedTestAtCreate()}
+                  onInput={(e) => setPlannedTestAtCreate(e.target.value)}
+                />
+              </div>
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-release">
+                  发布日期
+                </label>
+                <Inp
+                  id="cycle-create-release"
+                  type="date"
+                  value={releaseAtCreate()}
+                  onInput={(e) => setReleaseAtCreate(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <div class="cycle-form-field cycle-form-field--span">
+            <span class="cycle-form-label">发布条件（可选）</span>
+            <Index each={createReleaseConds()}>
+              {(row, index) => (
+                <div class="cycle-release-cond-row cycle-release-cond-row--create">
+                  <Inp
+                    placeholder="例如：主干回归通过"
+                    value={row().text}
+                    onInput={(e) => {
+                      const v = e.target.value;
+                      setCreateReleaseConds((prev) => prev.map((r, j) => (j === index ? { ...r, text: v } : r)));
+                    }}
+                    aria-label={`新建迭代发布条件 ${index + 1}`}
+                  />
+                  <Sel
+                    class="cycle-release-cond-status"
+                    value={row().status}
+                    options={RELEASE_COND_STATUS_OPTIONS}
+                    onChange={(v) => {
+                      const st = v === "done" ? "done" : "pending";
+                      setCreateReleaseConds((prev) => prev.map((r, j) => (j === index ? { ...r, status: st } : r)));
+                    }}
+                    aria-label={`新建迭代发布条件 ${index + 1} 状态`}
+                  />
+                  <Btn
+                    type="button"
+                    variant="text"
+                    class="cycle-release-cond-remove"
+                    onClick={() => {
+                      setCreateReleaseConds((prev) => {
+                        const next = prev.filter((_, j) => j !== index);
+                        return next.length ? next : [{ text: "", status: "pending" }];
+                      });
+                    }}
+                  >
+                    移除
+                  </Btn>
+                </div>
+              )}
+            </Index>
+            <Btn
+              type="button"
+              variant="text"
+              class="cycle-release-cond-add"
+              onClick={() =>
+                setCreateReleaseConds((prev) => [...prev, { text: "", status: "pending" }])
+              }
+            >
+              添加条件
+            </Btn>
+          </div>
+          <Show when={createKind() === "project"}>
+            <div class="cycle-form-field cycle-form-field--span">
+              <span class="cycle-form-label">项目文档链接（可选）</span>
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-product-doc">
+                  产品文档 URL
+                </label>
+                <Inp
+                  id="cycle-create-product-doc"
+                  placeholder="https://…"
+                  value={productDocCreate()}
+                  onInput={(e) => setProductDocCreate(e.target.value)}
+                />
+              </div>
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-design-doc">
+                  设计文档 URL
+                </label>
+                <Inp
+                  id="cycle-create-design-doc"
+                  placeholder="https://…"
+                  value={designDocCreate()}
+                  onInput={(e) => setDesignDocCreate(e.target.value)}
+                />
+              </div>
+              <div class="cycle-form-field">
+                <label class="cycle-form-sub-label" for="cycle-create-ui-doc">
+                  UI 文档 URL
+                </label>
+                <Inp
+                  id="cycle-create-ui-doc"
+                  placeholder="https://…"
+                  value={uiDocCreate()}
+                  onInput={(e) => setUiDocCreate(e.target.value)}
+                />
+              </div>
+            </div>
+          </Show>
         </form>
       </Modal>
     </section>

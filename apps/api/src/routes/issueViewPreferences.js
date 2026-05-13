@@ -32,11 +32,15 @@ function mergePayload(stored) {
   if (!stored || typeof stored !== "object") {
     return base;
   }
-  return {
+  const merged = {
     ...base,
     ...stored,
     columns: { ...base.columns, ...(stored.columns || {}) }
   };
+  if (merged.viewMode === "stats") {
+    merged.viewMode = "list";
+  }
+  return merged;
 }
 
 function prefKeyForTeam(teamId) {

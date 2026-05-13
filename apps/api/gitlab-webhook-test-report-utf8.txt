@@ -1,0 +1,421 @@
+﻿[notify:dingtalk] intent {
+  workspaceId: '01ab719c-f9f6-4910-82aa-1e0446dcf23b',
+  teamFilter: '(all teams)',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '📁 新建项目 Issue Platform\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    '标识：ISSUEPLATFOR\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: '77b21077-907c-432b-8ed9-e9ba9712beff',
+  teamName: 'Core Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+
+============== MR 打开：从标题解析任务号 → onPrOpen ==============
+— 1) 已创建任务（Webhook 之前） —
+{
+  "issueId": "815a2ed0-357d-456f-bb59-fa113e6dd35b",
+  "issues_id": "ISSUEPLATFOR-1",
+  "status": "todo",
+  "title": "Initial task"
+}
+— 2) 模拟 GitLab：Merge Request Hook 载荷摘要 —
+{
+  "object_kind": "merge_request",
+  "x_gitlab_event": "Merge Request Hook",
+  "title": "ISSUEPLATFOR-1 Implement something",
+  "source_branch": "feature/ISSUEPLATFOR-1-x",
+  "target_branch": "main",
+  "action": "open",
+  "state": "opened"
+}
+=======================================================
+
+
+============== MR 打开：Webhook 结果与任务状态 ==============
+— 3) POST /api/integrations/gitlab/webhook/:teamId 响应 —
+{
+  "ok": true,
+  "trigger": "onPrOpen",
+  "targetBranch": "main",
+  "desiredStatus": "in_review",
+  "updatedCount": 1,
+  "updated": [
+    {
+      "id": "815a2ed0-357d-456f-bb59-fa113e6dd35b",
+      "issuesId": "ISSUEPLATFOR-1",
+      "status": "in_review"
+    }
+  ],
+  "matchedIssueKeys": [
+    "ISSUEPLATFOR-1"
+  ]
+}
+— 4) 任务状态变化 —
+{
+  "before": "todo",
+  "after": "in_review",
+  "issueId": "815a2ed0-357d-456f-bb59-fa113e6dd35b"
+}
+===================================================
+
+✔ GitLab webhook should move issue status by rules (extract id from MR title) (274.1615ms)
+[notify:dingtalk] intent {
+  workspaceId: '01ab719c-f9f6-4910-82aa-1e0446dcf23b',
+  teamFilter: '77b21077-907c-432b-8ed9-e9ba9712beff',
+  teamCount: 0,
+  text: 'Ordo\n' +
+    '\n' +
+    '✨📌任务 ISSUEPLATFOR-1\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    'Initial task\n' +
+    '创建人：（未知）\n' +
+    '承接人：未指定\n' +
+    '预估工时：未填写\n' +
+    '截止时间：未设置\n' +
+    '项目：ISSUEPLATFOR\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip all { reason: '没有可通知的 Team（检查 teamId / workspace）' }
+[notify:dingtalk] intent {
+  workspaceId: 'e119e7cb-83ae-4b8c-9c04-447ef8ac6ff5',
+  teamFilter: '(all teams)',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '📁 新建项目 GL Branch Proj\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    '标识：GLBRANCHPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: '75c11451-08e8-44ea-90d7-07ab0d800684',
+  teamName: 'Branch Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+[notify:dingtalk] intent {
+  workspaceId: 'e119e7cb-83ae-4b8c-9c04-447ef8ac6ff5',
+  teamFilter: '75c11451-08e8-44ea-90d7-07ab0d800684',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '✨📌任务 BRT-1\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    'Branch workflow task\n' +
+    '创建人：alice\n' +
+    '承接人：未指定\n' +
+    '预估工时：未填写\n' +
+    '截止时间：未设置\n' +
+    '项目：GLBRANCHPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: '75c11451-08e8-44ea-90d7-07ab0d800684',
+  teamName: 'Branch Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+
+============== Push Hook：新分支首次推送（before 全 0）→ onPrActivity ==============
+— 1) 已创建任务 —
+{
+  "issueId": "98870d30-8a51-47a6-be06-ad6fc13c85fa",
+  "issues_id": "BRT-1",
+  "status": "todo",
+  "title": "Branch workflow task"
+}
+— 2) 模拟 GitLab：Push Hook 载荷摘要 —
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "ref": "refs/heads/feature/BRT-1-gitlab-new-branch",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "1a2b3c4d5e6f7890abcdef1234567890abcdabcd",
+  "commits": [
+    {
+      "id": "1a2b3c4d5e6f7890abcdef1234567890abcdabcd",
+      "message": "chore: create branch for issue",
+      "url": "https://gitlab.example/acme/mock-proj/-/commit/1a2b3c4d5e6f7890abcdef1234567890abcdabcd"
+    }
+  ],
+  "project": "acme/mock-proj"
+}
+=========================================================================
+
+
+============== Push Hook：处理结果与任务状态 ==============
+— 3) Webhook 响应 —
+{
+  "ok": true,
+  "trigger": "onPrActivity",
+  "targetBranch": "feature/BRT-1-gitlab-new-branch",
+  "desiredStatus": "in_progress",
+  "updatedCount": 1,
+  "updated": [
+    {
+      "id": "98870d30-8a51-47a6-be06-ad6fc13c85fa",
+      "issuesId": "BRT-1",
+      "status": "in_progress"
+    }
+  ],
+  "matchedIssueKeys": [
+    "BRT-1"
+  ]
+}
+— 4) 任务状态变化 —
+{
+  "before": "todo",
+  "after": "in_progress",
+  "matchedIssueKeys": [
+    "BRT-1"
+  ]
+}
+=================================================
+
+✔ GitLab webhook (mock Push Hook) should accept new-branch push and match issue key from branch name (176.1759ms)
+[notify:dingtalk] intent {
+  workspaceId: '2318b2f1-6a52-4a99-95b0-791f27a26d1c',
+  teamFilter: '(all teams)',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '📁 新建项目 MR Merge Proj\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    '标识：MRMERGEPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: 'b696d48e-84ae-4f93-96e9-a5f4328b5f20',
+  teamName: 'MR Merge Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+[notify:dingtalk] intent {
+  workspaceId: '2318b2f1-6a52-4a99-95b0-791f27a26d1c',
+  teamFilter: 'b696d48e-84ae-4f93-96e9-a5f4328b5f20',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '✨📌任务 MMT-1\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    'MR merge task\n' +
+    '创建人：alice\n' +
+    '承接人：未指定\n' +
+    '预估工时：未填写\n' +
+    '截止时间：未设置\n' +
+    '项目：MRMERGEPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: 'b696d48e-84ae-4f93-96e9-a5f4328b5f20',
+  teamName: 'MR Merge Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+
+============== MR 合并：action=merge → onMerge ==============
+— 1) 已创建任务 —
+{
+  "issueId": "57c9c397-fc04-49e3-ae2e-728ea53e2a8c",
+  "issues_id": "MMT-1",
+  "status": "todo",
+  "title": "MR merge task"
+}
+— 2) 模拟 GitLab：MR Hook（合并）载荷摘要 —
+{
+  "object_kind": "merge_request",
+  "x_gitlab_event": "Merge Request Hook",
+  "title": "MMT-1 ship feature",
+  "action": "merge",
+  "state": "merged",
+  "source_branch": "feature/MMT-1-impl",
+  "url": "https://gitlab.example/acme/mock-app/-/merge_requests/12"
+}
+==========================================================
+
+
+============== MR 合并：处理结果与任务状态 ==============
+— 3) Webhook 响应 —
+{
+  "ok": true,
+  "trigger": "onMerge",
+  "targetBranch": "main",
+  "desiredStatus": "done",
+  "updatedCount": 1,
+  "updated": [
+    {
+      "id": "57c9c397-fc04-49e3-ae2e-728ea53e2a8c",
+      "issuesId": "MMT-1",
+      "status": "done"
+    }
+  ],
+  "matchedIssueKeys": [
+    "MMT-1"
+  ]
+}
+— 4) 任务状态变化 —
+{
+  "before": "todo",
+  "after": "done"
+}
+=============================================
+
+✔ GitLab webhook (mock MR Hook) should accept merge event and apply onMerge rule (169.4821ms)
+[notify:dingtalk] intent {
+  workspaceId: 'cfa76f37-d39d-4b0c-936f-abda7a364045',
+  teamFilter: '(all teams)',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '📁 新建项目 GL WS Proj\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    '标识：GLWSPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: '143f318b-da11-4723-be47-66643292df28',
+  teamName: 'Ws Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+
+============== Workspace 级 Webhook：Push（提交信息含任务号） ==============
+— 1) 已创建任务 —
+{
+  "issueId": "55fd4d9f-405a-4d13-977e-42c815814387",
+  "issues_id": "WST-1",
+  "status": "todo",
+  "title": "Task for ws hook"
+}
+— 2) 模拟 GitLab：Push Hook（workspace 路由） —
+{
+  "object_kind": "push",
+  "ref": "refs/heads/main",
+  "commits": [
+    {
+      "id": "abc",
+      "message": "fix WST-1",
+      "url": "https://gitlab.example/c"
+    }
+  ],
+  "path": "/api/integrations/gitlab/webhook/workspace/cfa76f37-d39d-4b0c-936f-abda7a364045"
+}
+================================================================
+
+[notify:dingtalk] intent {
+  workspaceId: 'cfa76f37-d39d-4b0c-936f-abda7a364045',
+  teamFilter: '143f318b-da11-4723-be47-66643292df28',
+  teamCount: 1,
+  text: 'Ordo\n' +
+    '\n' +
+    '✨📌任务 WST-1\n' +
+    '━━━━━━━━━━━━━━━━\n' +
+    'Task for ws hook\n' +
+    '创建人：alice\n' +
+    '承接人：未指定\n' +
+    '预估工时：未填写\n' +
+    '截止时间：未设置\n' +
+    '项目：GLWSPROJ\n' +
+    '落地页：（未配置 ORDO_PUBLIC_WEB_BASE_URL）',
+  atMobiles: [],
+  atUserIds: []
+}
+[notify:dingtalk] skip {
+  teamId: '143f318b-da11-4723-be47-66643292df28',
+  teamName: 'Ws Team',
+  reason: 'notificationSettings.dingtalk.enabled 未开启'
+}
+[notify:dingtalk] skip all { reason: '所有 Team 均未启用钉钉或未填 Webhook，未发出任何消息' }
+
+============== Workspace Push：投递记录与活动类型 ==============
+— 3) Webhook 响应 —
+{
+  "ok": true,
+  "trigger": "onPrActivity",
+  "targetBranch": "main",
+  "updatedCount": 0,
+  "updated": [],
+  "matchedIssueKeys": [
+    "WST-1"
+  ]
+}
+— 4) 任务活动（含 gitlab_event） —
+{
+  "activityTypes": [
+    "issue_created",
+    "gitlab_event"
+  ]
+}
+— 5) deliveries 最近一条摘要 —
+{
+  "id": "cmp1dx0n1000fwdd8v30rccrv",
+  "summary": "Push grp/p @ main · 1 commit · 任务 WST-1",
+  "gitlabEventHeader": "Push Hook",
+  "objectKind": "push",
+  "matchedIssueKeys": [
+    "WST-1"
+  ],
+  "detail": {
+    "kind": "push",
+    "trigger": "onPrActivity",
+    "matchedCount": 1,
+    "targetBranch": "main",
+    "activityPreview": {
+      "ref": "refs/heads/main",
+      "user": "dev",
+      "commits": [
+        {
+          "id": "abc",
+          "url": "https://gitlab.example/c",
+          "title": null,
+          "message": "fix WST-1"
+        }
+      ],
+      "project": {
+        "name": "p",
+        "web_url": "https://gitlab.example/grp/p",
+        "path_with_namespace": "grp/p"
+      },
+      "eventKind": "push",
+      "compareUrl": null,
+      "gitlabEvent": "Push Hook",
+      "totalCommitsCount": 1
+    },
+    "extractedIssueKeys": [
+      "WST-1"
+    ],
+    "extractedNotMatched": []
+  },
+  "createdAt": "2026-05-11T15:56:50.173Z"
+}
+======================================================
+
+✔ GitLab workspace webhook should log delivery and gitlab_event on push (181.9123ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1240.2685

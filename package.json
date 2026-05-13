@@ -4,11 +4,13 @@
   "private": true,
   "workspaces": [
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "apps/mcp"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/web",
     "dev:all": "concurrently -n api,web -c cyan,magenta \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "dev:stack": "concurrently -n api,web,mcp -c cyan,magenta,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/mcp\"",
     "build": "npm run build -w apps/web && npm run build -w apps/api",
     "start": "npm run start -w apps/api",
     "test": "npm run test -w apps/api",

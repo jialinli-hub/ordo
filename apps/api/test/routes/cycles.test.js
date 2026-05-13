@@ -2,6 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
 const app = require("../../src/app");
+const { beforeEach } = require("node:test");
+const { resetDatabase } = require("../helpers/reset-database");
+
+beforeEach(async () => {
+  await resetDatabase();
+});
 
 test("POST /api/cycles should create cycle", async () => {
   const headers = {
@@ -185,4 +191,75 @@ test("POST /api/cycles should allow same-day cycle window", async () => {
   });
   assert.equal(createRes.statusCode, 201);
   assert.equal(createRes.body.name, "One day sprint");
+});
+
+test("PATCH /api/cycles should allow empty doc URL patch when cycle is already daily (e.g. after kind switch)", async () => {
+  const headers = {
+    Authorization: "Bearer dev-dingtalk:alice@example.com",
+    "x-organization-id": "org-cycle-patch-daily-doc"
+  };
+  const teamRes = await request(app).post("/api/teams").set(headers).send({ name: "Patch Team" });
+  assert.equal(teamRes.statusCode, 201);
+  const projectRes = await request(app).post("/api/projects").set(headers).send({ name: "Patch Proj", key: "PPD" });
+  assert.equal(projectRes.statusCode, 201);
+
+  const createRes = await request(app).post("/api/cycles").set(headers).send({
+    teamId: teamRes.body.id,
+    projectId: projectRes.body.id,
+    name: "Proj sprint",
+    kind: "project",
+    startsAt: "2026-04-01T00:00:00.000Z",
+    endsAt: "2026-04-10T00:00:00.000Z",
+    productDocUrl: "https://wiki.example/p"
+  });
+  assert.equal(createRes.statusCode, 201);
+  const id = createRes.body.id;
+
+  const toDaily = await request(app).patch(`/api/cycles/${encodeURIComponent(id)}`).set(headers).send({ kind: "daily" });
+  assert.equal(toDaily.statusCode, 200);
+  assert.equal(toDaily.body.kind, "daily");
+
+  const clearDoc = await request(app)
+    .patch(`/api/cycles/${encodeURIComponent(id)}`)
+    .set(headers)
+    .send({ productDocUrl: "" });
+  assert.equal(clearDoc.statusCode, 200);
+});
+
+test("POST and PATCH /api/cycles persist releaseConditions", async () => {
+  const headers = {
+    Authorization: "Bearer dev-dingtalk:alice@example.com",
+    "x-organization-id": "org-cycle-release-cond"
+  };
+  const teamRes = await request(app).post("/api/teams").set(headers).send({ name: "Rel Team" });
+  assert.equal(teamRes.statusCode, 201);
+
+  const createRes = await request(app)
+    .post("/api/cycles")
+    .set(headers)
+    .send({
+      teamId: teamRes.body.id,
+      name: "Sprint RC",
+      startsAt: "2026-06-01T00:00:00.000Z",
+      endsAt: "2026-06-14T23:59:59.000Z",
+      releaseConditions: [
+        { text: "  QA 签字  ", status: "pending" },
+        { text: "生产监控就绪", status: "done" }
+      ]
+    });
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(createRes.body.releaseConditions.length, 2);
+  assert.equal(createRes.body.releaseConditions[0].text, "QA 签字");
+  assert.equal(createRes.body.releaseConditions[0].status, "pending");
+  assert.equal(createRes.body.releaseConditions[1].status, "done");
+
+  const patchRes = await request(app)
+    .patch(`/api/cycles/${encodeURIComponent(createRes.body.id)}`)
+    .set(headers)
+    .send({
+      releaseConditions: [{ text: "仅保留一条", status: "done" }]
+    });
+  assert.equal(patchRes.statusCode, 200);
+  assert.equal(patchRes.body.releaseConditions.length, 1);
+  assert.equal(patchRes.body.releaseConditions[0].status, "done");
 });

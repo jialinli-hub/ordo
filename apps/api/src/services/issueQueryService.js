@@ -7,6 +7,7 @@ async function queryIssues({
   workspaceId = null,
   status,
   teamId,
+  assigneeId,
   page = 1,
   pageSize = 20
 }) {
@@ -17,7 +18,8 @@ async function queryIssues({
     ...baseWhere,
     parentIssueId: null,
     ...(status ? { status } : {}),
-    ...(teamId ? { teamId } : {})
+    ...(teamId ? { teamId } : {}),
+    ...(assigneeId ? { assigneeId } : {})
   };
 
   const normalizedPage = Number(page) || 1;

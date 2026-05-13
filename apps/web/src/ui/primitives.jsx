@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup, onMount, mergeProps, splitProps } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount, mergeProps, splitProps } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./primitives.css";
 
@@ -18,13 +18,23 @@ export function Btn(raw) {
 
   function cls() {
     const bits = ["btn-ordo"];
-    if (bp.variant === "primary") {
-      bits.push("btn-ordo-primary");
+    const v = bp.variant;
+    if (v === "save" || v === "primary") {
+      bits.push("btn-ordo-save");
     }
-    if (bp.variant === "text" || bp.variant === "link") {
+    if (v === "create") {
+      bits.push("btn-ordo-create");
+    }
+    if (v === "pressed") {
+      bits.push("btn-ordo-pressed");
+    }
+    if (v === "danger") {
+      bits.push("btn-ordo-danger");
+    }
+    if (v === "text" || v === "link") {
       bits.push("btn-ordo-text");
     }
-    if ((bp.variant === "text" || bp.variant === "link") && bp.danger) {
+    if ((v === "text" || v === "link") && bp.danger) {
       bits.push("btn-ordo-danger-text");
     }
     if (bp.class) {
@@ -183,8 +193,18 @@ export function Sel(raw) {
     return ["sel-ordo", props.class].filter(Boolean).join(" ");
   }
 
+  let el;
+  createEffect(() => {
+    if (!el) {
+      return;
+    }
+    /** 确保受控 select 回显正确（部分浏览器/时序下 JSX value 不一定覆盖默认选中项） */
+    el.value = props.value != null ? String(props.value) : "";
+  });
+
   return (
     <select
+      ref={el}
       id={props.id}
       class={cls()}
       value={props.value != null ? String(props.value) : ""}

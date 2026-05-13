@@ -7,6 +7,11 @@ export function defaultIssueViewPrefs() {
     orderBy: "priority",
     orderDesc: false,
     showEmptyBoardColumns: false,
+    stats: {
+      measure: "issue_count",
+      slice: "status",
+      segment: "priority"
+    },
     columns: {
       id: true,
       status: true,
@@ -42,11 +47,16 @@ export async function loadIssueViewPrefs(teamId, workspaceId) {
     if (!p || typeof p !== "object") {
       return base;
     }
-    return {
+    const merged = {
       ...base,
       ...p,
       columns: { ...base.columns, ...(p.columns || {}) }
     };
+    /* 统计已与列表同页展示，不再使用独立 viewMode */
+    if (merged.viewMode === "stats") {
+      merged.viewMode = "list";
+    }
+    return merged;
   } catch {
     return base;
   }

@@ -15,46 +15,67 @@ async function ensureUserFromLoginIdentity(identity, client = prisma) {
   const email = String(emailRaw).trim();
   const unionId = identity.dingTalkUnionId || null;
   const staffId = identity.dingTalkStaffId || null;
-
-  let user = null;
-  if (unionId) {
-    user = await client.user.findUnique({ where: { dingTalkUnionId: unionId } });
-  }
-  if (!user) {
-    user = await client.user.findUnique({ where: { email } });
-  }
+  const userIdForAt = identity.dingTalkUserId || null;
 
   const displayName = identity.name ?? email.split("@")[0];
 
-  if (!user) {
-    return client.user.create({
-      data: {
+  // 防并发：优先按 unionId 命中；否则按 email upsert；如遇唯一约束冲突则回退查询
+  try {
+    if (unionId) {
+      const hit = await client.user.findUnique({ where: { dingTalkUnionId: unionId } });
+      if (hit) {
+        const data = {
+          name: identity.name ?? hit.name,
+          ...(identity.picture !== undefined ? { avatarUrl: identity.picture ?? hit.avatarUrl } : {}),
+          ...(staffId ? { dingTalkStaffId: staffId } : {}),
+          ...(userIdForAt ? { dingTalkUserId: userIdForAt } : {}),
+          ...(identity.dingTalkMobile !== undefined && identity.dingTalkMobile !== null
+            ? { dingTalkMobile: identity.dingTalkMobile }
+            : {})
+        };
+        return client.user.update({ where: { id: hit.id }, data });
+      }
+    }
+
+    const upserted = await client.user.upsert({
+      where: { email },
+      create: {
         email,
         name: displayName,
         avatarUrl: identity.picture ?? null,
         ...(unionId ? { dingTalkUnionId: unionId } : {}),
-        ...(staffId ? { dingTalkStaffId: staffId } : {})
+        ...(staffId ? { dingTalkStaffId: staffId } : {}),
+        ...(userIdForAt ? { dingTalkUserId: userIdForAt } : {}),
+        ...(identity.dingTalkMobile !== undefined && identity.dingTalkMobile !== null
+          ? { dingTalkMobile: identity.dingTalkMobile }
+          : {})
+      },
+      update: {
+        name: identity.name ?? undefined,
+        ...(identity.picture !== undefined ? { avatarUrl: identity.picture ?? undefined } : {}),
+        ...(unionId ? { dingTalkUnionId: unionId } : {}),
+        ...(staffId ? { dingTalkStaffId: staffId } : {}),
+        ...(userIdForAt ? { dingTalkUserId: userIdForAt } : {}),
+        ...(identity.dingTalkMobile !== undefined && identity.dingTalkMobile !== null
+          ? { dingTalkMobile: identity.dingTalkMobile }
+          : {})
       }
     });
+    return upserted;
+  } catch (e) {
+    // 典型场景：并发创建导致 email/unionId 唯一约束冲突；回退查找返回已有用户
+    if (unionId) {
+      const hit = await client.user.findUnique({ where: { dingTalkUnionId: unionId } });
+      if (hit) {
+        return hit;
+      }
+    }
+    const byEmail = await client.user.findUnique({ where: { email } });
+    if (byEmail) {
+      return byEmail;
+    }
+    throw e;
   }
-
-  const data = {
-    name: identity.name ?? user.name
-  };
-  if (identity.picture !== undefined) {
-    data.avatarUrl = identity.picture ?? user.avatarUrl;
-  }
-  if (unionId) {
-    data.dingTalkUnionId = unionId;
-  }
-  if (staffId) {
-    data.dingTalkStaffId = staffId;
-  }
-
-  return client.user.update({
-    where: { id: user.id },
-    data
-  });
 }
 
 module.exports = { ensureUserFromLoginIdentity };

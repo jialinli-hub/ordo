@@ -1,5 +1,5 @@
 const express = require("express");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, randomBytes } = require("node:crypto");
 const { prisma } = require("../repositories/prisma");
 
 const workspacesRouter = express.Router();
@@ -25,7 +25,8 @@ async function getMyWorkspaces(userId) {
       url: ws.url,
       key: ws.key ?? null,
       role: m.role,
-      memberCount
+      memberCount,
+      gitlabIntegration: mapGitlabIntegrationSafe(ws)
     });
   }
   return items;
@@ -60,6 +61,16 @@ async function ensureUniqueWorkspaceUrl(baseUrl, organizationId, excludeWorkspac
   }
 }
 
+function mapGitlabIntegrationSafe(ws) {
+  const raw = ws.gitlabIntegrationJson;
+  const obj = raw && typeof raw === "object" ? raw : {};
+  return {
+    enabled: Boolean(obj.enabled),
+    hasSecret: Boolean(String(obj.secret || "").trim()),
+    webhookPath: `/api/integrations/gitlab/webhook/workspace/${ws.id}`
+  };
+}
+
 function mapWorkspace(ws) {
   return {
     id: ws.id,
@@ -70,7 +81,8 @@ function mapWorkspace(ws) {
     ownerUserId: ws.ownerUserId,
     createdBy: ws.createdBy,
     createdAt: ws.createdAt.toISOString(),
-    updatedAt: ws.updatedAt.toISOString()
+    updatedAt: ws.updatedAt.toISOString(),
+    gitlabIntegration: mapGitlabIntegrationSafe(ws)
   };
 }
 
@@ -169,11 +181,66 @@ workspacesRouter.patch("/:workspaceId", async (req, res) => {
     return res.status(409).json({ message: "workspace url already exists" });
   }
 
+  const gitlabPatch = req.body?.gitlabIntegration;
+  /** @type {Record<string, unknown>} */
+  const data = { name: nextName, url: nextUrl };
+  if (gitlabPatch && typeof gitlabPatch === "object" && gitlabPatch !== null) {
+    const prev =
+      workspace.gitlabIntegrationJson && typeof workspace.gitlabIntegrationJson === "object"
+        ? workspace.gitlabIntegrationJson
+        : {};
+    /** @type {Record<string, unknown>} */
+    const next = { ...prev };
+    if (Object.prototype.hasOwnProperty.call(gitlabPatch, "enabled")) {
+      next.enabled = Boolean(gitlabPatch.enabled);
+    }
+    if (gitlabPatch.generateSecret === true) {
+      next.secret = randomBytes(24).toString("hex");
+    } else if (typeof gitlabPatch.secret === "string" && gitlabPatch.secret.trim()) {
+      if (gitlabPatch.secret.trim().length > 512) {
+        return res.status(422).json({ message: "gitlabIntegration.secret too long" });
+      }
+      next.secret = gitlabPatch.secret.trim();
+    }
+    data.gitlabIntegrationJson = next;
+  }
+
   const updated = await prisma.workspace.update({
     where: { id: workspace.id },
-    data: { name: nextName, url: nextUrl }
+    data
   });
-  return res.json(mapWorkspace(updated));
+  const out = mapWorkspace(updated);
+  if (gitlabPatch?.generateSecret === true) {
+    const raw = updated.gitlabIntegrationJson;
+    if (raw && typeof raw === "object" && raw.secret) {
+      out.gitlabSecretRevealOnce = String(raw.secret);
+    }
+  }
+  return res.json(out);
+});
+
+workspacesRouter.get("/:workspaceId/gitlab/deliveries", async (req, res) => {
+  const { workspaceId } = req.params;
+  if (!(await getMembership(workspaceId, req.context.userId))) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  const lim = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+  const rows = await prisma.gitlabWebhookDelivery.findMany({
+    where: { workspaceId },
+    orderBy: { createdAt: "desc" },
+    take: lim
+  });
+  return res.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      summary: r.summary,
+      gitlabEventHeader: r.gitlabEventHeader,
+      objectKind: r.objectKind,
+      matchedIssueKeys: r.matchedIssueKeys,
+      detail: r.detail,
+      createdAt: r.createdAt.toISOString()
+    }))
+  });
 });
 
 workspacesRouter.get("/:workspaceId/members", async (req, res) => {
@@ -202,7 +269,7 @@ workspacesRouter.get("/:workspaceId/members", async (req, res) => {
 
 workspacesRouter.post("/:workspaceId/invites", async (req, res) => {
   const { workspaceId } = req.params;
-  const { role = "member" } = req.body ?? {};
+  const { role = "member", contextTeamId: contextTeamBody } = req.body ?? {};
   if (!["owner", "admin", "member"].includes(role)) {
     return res.status(422).json({ message: "invalid role" });
   }
@@ -210,6 +277,18 @@ workspacesRouter.post("/:workspaceId/invites", async (req, res) => {
   const inviterMembership = await getMembership(workspaceId, req.context.userId);
   if (!inviterMembership || !["owner", "admin"].includes(inviterMembership.role)) {
     return res.status(403).json({ message: "Forbidden" });
+  }
+
+  let resolvedContextTeamId = null;
+  if (contextTeamBody != null && String(contextTeamBody).trim()) {
+    const tid = String(contextTeamBody).trim();
+    const teamRow = await prisma.team.findFirst({
+      where: { id: tid, workspaceId }
+    });
+    if (!teamRow) {
+      return res.status(422).json({ message: "invalid contextTeamId" });
+    }
+    resolvedContextTeamId = teamRow.id;
   }
 
   const now = new Date();
@@ -222,12 +301,16 @@ workspacesRouter.post("/:workspaceId/invites", async (req, res) => {
       status: "pending",
       token,
       expiresAt,
-      invitedBy: req.context.userId
+      invitedBy: req.context.userId,
+      contextTeamId: resolvedContextTeamId
     }
   });
 
   const webBaseUrl = process.env.WEB_BASE_URL || "http://localhost:5173";
-  const inviteLink = `${webBaseUrl}/accept-workspace-invite?token=${encodeURIComponent(token)}`;
+  let inviteLink = `${webBaseUrl}/accept-workspace-invite?token=${encodeURIComponent(token)}`;
+  if (resolvedContextTeamId) {
+    inviteLink += `&team=${encodeURIComponent(resolvedContextTeamId)}`;
+  }
 
   return res.status(201).json({
     inviteId: invite.id,

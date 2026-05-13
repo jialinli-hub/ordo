@@ -1,39 +1,44 @@
 const express = require("express");
 
+const { prisma } = require("../repositories/prisma");
+
 const {
-
   createProject,
-
   listProjectsByWorkspace,
-
   getProjectById,
-
   updateProject,
-
   deleteProject
-
 } = require("../repositories/projectRepository");
 
 
+
+const {
+  notifyTeamsDingTalk,
+  formatProjectNotify,
+  buildProjectDeepLink,
+  buildWorkspaceHomeDeepLink,
+  publicWebBase
+} = require("../services/teamNotifications");
+const { makeKey, getJson, setJson, invalidateWorkspace } = require("../services/workspaceReadCache");
 
 const projectsRouter = express.Router();
 
 
 
 function mapProject(p) {
-
+  const lead =
+    p.lead && p.lead.id
+      ? { id: p.lead.id, name: p.lead.name, email: p.lead.email }
+      : null;
   return {
-
     id: p.id,
-
     name: p.name,
-
+    key: p.key,
+    description: p.description ?? null,
+    lead,
     createdAt: p.createdAt.toISOString(),
-
     updatedAt: p.updatedAt.toISOString()
-
   };
-
 }
 
 /** 从名称生成 key 字母数字片段（全中文等无字母时为空，由调用方回退为 PRJ） */
@@ -71,20 +76,31 @@ projectsRouter.use((req, res, next) => {
 
 
 projectsRouter.post("/", async (req, res) => {
-
   const organizationId = req.context.organizationId;
-
   const workspaceId = req.context.workspaceId;
-
-  const { name } = req.body ?? {};
+  const { name, description, leadUserId: leadRaw } = req.body ?? {};
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
-
   if (!trimmedName) {
-
     return res.status(400).json({ message: "name is required" });
-
   }
+
+  let resolvedLead = req.context.userId;
+  if (leadRaw != null && String(leadRaw).trim() !== "") {
+    resolvedLead = String(leadRaw).trim();
+  }
+  if (!resolvedLead) {
+    return res.status(400).json({ message: "leadUserId is required" });
+  }
+
+  const leadMember = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId: resolvedLead }
+  });
+  if (!leadMember) {
+    return res.status(400).json({ message: "leadUserId must be a workspace member" });
+  }
+
+  const desc = description != null && typeof description === "string" ? description.trim() : "";
 
   const list = await listProjectsByWorkspace(organizationId, workspaceId);
 
@@ -94,7 +110,37 @@ projectsRouter.post("/", async (req, res) => {
 
   const key = allocateAutoProjectKey(base, keySet);
 
-  const project = await createProject({ organizationId, workspaceId, name: trimmedName, key });
+  const project = await createProject({
+    organizationId,
+    workspaceId,
+    name: trimmedName,
+    key,
+    description: desc || null,
+    leadUserId: resolvedLead
+  });
+  invalidateWorkspace(workspaceId);
+
+  void (async () => {
+    const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { url: true } });
+    const landingUrl =
+      buildProjectDeepLink({
+        publicBase: publicWebBase(),
+        workspaceUrlSlug: ws?.url,
+        projectId: project.id
+      }) || buildWorkspaceHomeDeepLink(publicWebBase(), ws?.url);
+    await notifyTeamsDingTalk({
+      workspaceId,
+      teamId: null,
+      text: formatProjectNotify({
+        action: "created",
+        name: project.name,
+        key: project.key,
+        landingUrl
+      })
+    });
+  })().catch((e) => {
+    console.warn("[notify:dingtalk] project created send failed", e?.message || e);
+  });
 
   return res.status(201).json(mapProject(project));
 
@@ -103,15 +149,17 @@ projectsRouter.post("/", async (req, res) => {
 
 
 projectsRouter.get("/", async (req, res) => {
-
   const organizationId = req.context.organizationId;
-
   const workspaceId = req.context.workspaceId;
-
+  const cacheKey = makeKey(["v2", workspaceId, "projects", organizationId]);
+  const hit = getJson(cacheKey);
+  if (hit) {
+    return res.json(hit);
+  }
   const projects = await listProjectsByWorkspace(organizationId, workspaceId);
-
-  return res.json({ items: projects.map(mapProject) });
-
+  const body = { items: projects.map(mapProject) };
+  setJson(cacheKey, body);
+  return res.json(body);
 });
 
 
@@ -165,6 +213,7 @@ projectsRouter.patch("/:id", async (req, res) => {
     return res.status(404).json({ message: "Project not found" });
 
   }
+  invalidateWorkspace(workspaceId);
 
   return res.json(mapProject(project));
 
@@ -185,6 +234,24 @@ projectsRouter.delete("/:id", async (req, res) => {
     return res.status(404).json({ message: "Project not found" });
 
   }
+  invalidateWorkspace(workspaceId);
+
+  void (async () => {
+    const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { url: true } });
+    const landingUrl = buildWorkspaceHomeDeepLink(publicWebBase(), ws?.url);
+    await notifyTeamsDingTalk({
+      workspaceId,
+      teamId: null,
+      text: formatProjectNotify({
+        action: "deleted",
+        name: removed.name,
+        key: removed.key,
+        landingUrl
+      })
+    });
+  })().catch((e) => {
+    console.warn("[notify:dingtalk] project deleted send failed", e?.message || e);
+  });
 
   return res.json({ id: removed.id, deleted: true });
 

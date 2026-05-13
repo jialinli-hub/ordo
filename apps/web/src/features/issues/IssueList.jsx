@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, mergeProps, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, mergeProps, onCleanup, onMount } from "solid-js";
 import dayjs from "dayjs";
 import {
   Btn,
@@ -11,8 +11,8 @@ import {
   TextArea,
   ToggleSwitch
 } from "../../ui/primitives.jsx";
+import { issueDetailPath } from "../../lib/appPaths.js";
 import { teamMenuColor } from "../../lib/teamMenuColor";
-import { teamSegmentForUrl } from "../../lib/teamSlug";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/client";
 import { IssueDetail } from "./IssueDetail";
 import { defaultIssueViewPrefs, loadIssueViewPrefs, resetIssueViewPrefs, saveIssueViewPrefs } from "./issuePrefs";
@@ -21,17 +21,21 @@ import {
   STATUS_META,
   TYPE_FILTER_OPTIONS,
   TYPE_LABEL,
+  issueDisplayRef,
   issueIdentifier,
-  routeIssueSegment,
   typeTagClass
 } from "./issueUi";
 
-function issuesUrl(teamId) {
-  const page = "pageSize=500";
+function issuesUrl(teamId, opts = {}) {
+  const q = new URLSearchParams();
+  q.set("pageSize", "500");
   if (teamId) {
-    return `/api/issues?teamId=${encodeURIComponent(teamId)}&${page}`;
+    q.set("teamId", teamId);
   }
-  return `/api/issues?${page}`;
+  if (opts.mine) {
+    q.set("mine", "1");
+  }
+  return `/api/issues?${q.toString()}`;
 }
 
 function navigateTo(path) {
@@ -83,6 +87,22 @@ const PRIORITY_OPTIONS = [
   { value: 2, label: "高" },
   { value: 3, label: "中" },
   { value: 4, label: "低" }
+];
+
+const STATS_MEASURE_OPTIONS = [{ value: "issue_count", label: "Issue count" }];
+const STATS_SLICE_OPTIONS = [
+  { value: "status", label: "Status" },
+  { value: "priority", label: "Priority" },
+  { value: "type", label: "Type" },
+  { value: "project", label: "Project" },
+  { value: "cycle", label: "Cycle" },
+  { value: "assignee", label: "Assignee" }
+];
+const STATS_SEGMENT_OPTIONS = [
+  { value: "none", label: "None" },
+  { value: "priority", label: "Priority" },
+  { value: "status", label: "Status" },
+  { value: "type", label: "Type" }
 ];
 
 /** Sel 无法用 null，用作「未关联迭代」 sentinel */
@@ -450,7 +470,6 @@ function emptyCreateForm() {
     priority: 2,
     projectId: "",
     cycleId: null,
-    cycleEpicId: null,
     estimateHours: "",
     labels: "",
     dueDate: "",
@@ -508,13 +527,9 @@ function sortIssues(arr, orderBy, orderDesc) {
 
 export function IssueList(raw) {
   const props = mergeProps(
-    { teamName: "", workspaceId: "", issueId: "", workspacePathPrefix: "" },
+    { teamName: "", workspaceId: "", issueId: "", workspacePathPrefix: "", mineIssues: false },
     raw
   );
-
-  function withWorkspacePrefix(path) {
-    return `${props.workspacePathPrefix}${path}`;
-  }
 
   let descriptionInputEl;
 
@@ -530,24 +545,36 @@ export function IssueList(raw) {
   const [filter, setFilter] = createSignal(emptyIssueFilter());
   const [rangeTab, setRangeTab] = createSignal("all");
   const [viewPrefs, setViewPrefs] = createSignal(defaultIssueViewPrefs());
-  const [cycleEpics, setCycleEpics] = createSignal([]);
-
+  const [viewPrefsDirty, setViewPrefsDirty] = createSignal(false);
   createEffect(() => {
     const tid = props.teamId;
     const wid = props.workspaceId;
     let alive = true;
     setViewPrefs(defaultIssueViewPrefs());
+    setViewPrefsDirty(false);
     if (!wid) {
       return;
     }
     loadIssueViewPrefs(tid, wid).then((p) => {
       if (alive) {
-        setViewPrefs(p);
+        // 避免“加载偏好”晚于用户交互导致选择无法生效
+        if (!viewPrefsDirty()) {
+          setViewPrefs(p);
+        }
       }
     });
     onCleanup(() => {
       alive = false;
     });
+  });
+
+  onMount(() => {
+    function onGlobalSearch(ev) {
+      const q = ev.detail?.query != null ? String(ev.detail.query) : "";
+      setFilter((prev) => ({ ...prev, search: q }));
+    }
+    window.addEventListener("ordo-global-search", onGlobalSearch);
+    onCleanup(() => window.removeEventListener("ordo-global-search", onGlobalSearch));
   });
 
   createEffect(() => {
@@ -556,8 +583,11 @@ export function IssueList(raw) {
     function onKey(ev) {
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "b") {
         ev.preventDefault();
+        setViewPrefsDirty(true);
         setViewPrefs((prev) => {
-          const next = { ...prev, viewMode: prev.viewMode === "list" ? "board" : "list" };
+          const cur = prev.viewMode === "stats" ? "list" : prev.viewMode;
+          const nextMode = cur === "list" ? "board" : "list";
+          const next = { ...prev, viewMode: nextMode };
           saveIssueViewPrefs(tid, wid, next);
           return next;
         });
@@ -569,6 +599,7 @@ export function IssueList(raw) {
 
   function updateViewPrefs(partial) {
     const wid = props.workspaceId;
+    setViewPrefsDirty(true);
     setViewPrefs((prev) => {
       const next = { ...prev, ...partial };
       saveIssueViewPrefs(props.teamId, wid, next);
@@ -576,8 +607,13 @@ export function IssueList(raw) {
     });
   }
 
+  function updateStatsPrefs(patch) {
+    updateViewPrefs({ stats: { ...(viewPrefs().stats || {}), ...patch } });
+  }
+
   function toggleColumn(key) {
     const wid = props.workspaceId;
+    setViewPrefsDirty(true);
     setViewPrefs((prev) => {
       const next = { ...prev, columns: { ...prev.columns, [key]: !prev.columns[key] } };
       saveIssueViewPrefs(props.teamId, wid, next);
@@ -590,26 +626,34 @@ export function IssueList(raw) {
   }
 
   async function loadIssues() {
-    const data = await apiGet(issuesUrl(props.teamId));
+    const data = await apiGet(issuesUrl(props.teamId, { mine: props.mineIssues }));
     setIssues(data.items ?? []);
   }
 
   createEffect(() => {
     const teamIdProp = props.teamId;
+    const mine = props.mineIssues;
     let alive = true;
-    const reqs = teamIdProp
-      ? [
-          apiGet(issuesUrl(teamIdProp)),
-          apiGet("/api/projects"),
-          apiGet(`/api/cycles?teamId=${encodeURIComponent(teamIdProp)}`)
-        ]
-      : [apiGet(issuesUrl()), apiGet("/api/projects"), apiGet("/api/teams")];
+    const reqs = mine
+      ? [apiGet(issuesUrl(null, { mine: true })), apiGet("/api/projects"), apiGet("/api/teams")]
+      : teamIdProp
+        ? [
+            apiGet(issuesUrl(teamIdProp)),
+            apiGet("/api/projects"),
+            apiGet(`/api/cycles?teamId=${encodeURIComponent(teamIdProp)}`)
+          ]
+        : [apiGet(issuesUrl()), apiGet("/api/projects"), apiGet("/api/teams")];
     Promise.all(reqs)
       .then(([a, b, c]) => {
         if (!alive) {
           return;
         }
-        if (teamIdProp) {
+        if (mine) {
+          setIssues(a.items ?? []);
+          setProjects(b.items ?? []);
+          setTeams(c.items ?? []);
+          setCycles([]);
+        } else if (teamIdProp) {
           setIssues(a.items ?? []);
           setProjects(b.items ?? []);
           setCycles(c.items ?? []);
@@ -678,29 +722,6 @@ export function IssueList(raw) {
     }
   });
 
-  createEffect(() => {
-    const cid = form().cycleId;
-    if (!cid || !showCreateModal()) {
-      setCycleEpics([]);
-      return;
-    }
-    let alive = true;
-    apiGet(`/api/cycles/${encodeURIComponent(cid)}/epics`)
-      .then((d) => {
-        if (alive) {
-          setCycleEpics(d.items ?? []);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setCycleEpics([]);
-        }
-      });
-    onCleanup(() => {
-      alive = false;
-    });
-  });
-
   function openCreateModalForType(type) {
     setError("");
     mergeForm({
@@ -741,7 +762,6 @@ export function IssueList(raw) {
         status: f.status,
         priority: Number(f.priority),
         cycleId: f.cycleId || null,
-        cycleEpicId: f.cycleEpicId || null,
         estimateHours: (() => {
           if (f.estimateHours === "" || f.estimateHours == null) {
             return null;
@@ -762,8 +782,7 @@ export function IssueList(raw) {
           ...emptyCreateForm(),
           type: f.type,
           projectId: f.projectId,
-          cycleId: f.cycleId,
-          cycleEpicId: f.cycleEpicId
+          cycleId: f.cycleId
         });
       } else {
         closeCreateModal();
@@ -948,10 +967,6 @@ export function IssueList(raw) {
     return (m?.name || "?").slice(0, 1);
   }
 
-  function teamPathSeg() {
-    return teamSegmentForUrl({ name: props.teamName, id: props.teamId });
-  }
-
   function renderIssueRowExtra(issue) {
     const c = viewPrefs().columns;
     const p = projectMap()[issue.projectId];
@@ -1012,6 +1027,175 @@ export function IssueList(raw) {
     );
   }
 
+  function dimLabel(dim, issue) {
+    if (dim === "status") {
+      return STATUS_META[issue.status]?.label ?? issue.status;
+    }
+    if (dim === "priority") {
+      return PRIORITY_OPTIONS.find((x) => Number(x.value) === Number(issue.priority))?.label ?? String(issue.priority);
+    }
+    if (dim === "type") {
+      return TYPE_LABEL[issue.type] || issue.type || "—";
+    }
+    if (dim === "project") {
+      const p = projectMap()[issue.projectId];
+      return p?.name ?? "—";
+    }
+    if (dim === "cycle") {
+      const c = issue.cycleId ? cycles().find((x) => x.id === issue.cycleId) : null;
+      return c?.name ?? "—";
+    }
+    if (dim === "assignee") {
+      const uid = issue.assigneeId || "";
+      if (!uid) return "Unassigned";
+      const m = members().find((x) => x.userId === uid);
+      return m?.name ?? "Member";
+    }
+    return "—";
+  }
+
+  function dimKey(dim, issue) {
+    if (dim === "project") return issue.projectId || "";
+    if (dim === "cycle") return issue.cycleId || "";
+    if (dim === "assignee") return issue.assigneeId || "";
+    return String(issue[dim] ?? "");
+  }
+
+  const statsRows = createMemo(() => {
+    const vp = viewPrefs();
+    const st = vp.stats || { measure: "issue_count", slice: "status", segment: "priority" };
+    const slice = st.slice || "status";
+    const segment = st.segment || "priority";
+    const items = sortedIssues();
+    const bySlice = new Map();
+    for (const issue of items) {
+      const sk = dimKey(slice, issue) || "__empty__";
+      const sl = dimLabel(slice, issue);
+      if (!bySlice.has(sk)) {
+        bySlice.set(sk, { sliceKey: sk, sliceLabel: sl, total: 0, segments: new Map() });
+      }
+      const row = bySlice.get(sk);
+      row.total += 1;
+      if (segment && segment !== "none") {
+        const gk = dimKey(segment, issue) || "__empty__";
+        const gl = dimLabel(segment, issue);
+        row.segments.set(gk, { key: gk, label: gl, value: (row.segments.get(gk)?.value || 0) + 1 });
+      }
+    }
+    const rows = [...bySlice.values()].map((r) => ({
+      ...r,
+      segmentList: [...r.segments.values()].sort((a, b) => b.value - a.value)
+    }));
+    rows.sort((a, b) => b.total - a.total);
+    return { measure: st.measure, slice, segment, rows };
+  });
+
+  const statsSegmentKeys = createMemo(() => {
+    const st = statsRows();
+    if (!st.segment || st.segment === "none") return [];
+    const map = new Map();
+    for (const r of st.rows) {
+      for (const seg of r.segmentList) {
+        if (!map.has(seg.key)) {
+          map.set(seg.key, seg.label);
+        }
+      }
+    }
+    const list = [...map.entries()].map(([key, label]) => ({ key, label }));
+    list.sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+    return list;
+  });
+
+  function renderStatsView() {
+    const st = statsRows();
+    const total = st.rows.reduce((acc, r) => acc + r.total, 0);
+    const max = Math.max(1, ...st.rows.map((r) => r.total));
+    const segs = statsSegmentKeys();
+    return (
+      <section class="issue-stats issue-stats--aside surface-card">
+        <header class="issue-stats-head">
+          <div class="issue-stats-title">
+            <strong>{total}</strong> <span class="muted">issues</span>
+          </div>
+          <div class="issue-stats-controls">
+            <div class="issue-stats-control">
+              <div class="muted issue-stats-label">Measure</div>
+              <Sel
+                class="fullw"
+                value={st.measure || "issue_count"}
+                options={STATS_MEASURE_OPTIONS}
+                onChange={(v) => updateStatsPrefs({ measure: v })}
+              />
+            </div>
+            <div class="issue-stats-control">
+              <div class="muted issue-stats-label">Slice</div>
+              <Sel
+                class="fullw"
+                value={st.slice || "status"}
+                options={STATS_SLICE_OPTIONS}
+                onChange={(v) => updateStatsPrefs({ slice: v })}
+              />
+            </div>
+            <div class="issue-stats-control">
+              <div class="muted issue-stats-label">Segment</div>
+              <Sel
+                class="fullw"
+                value={st.segment || "priority"}
+                options={STATS_SEGMENT_OPTIONS}
+                onChange={(v) => updateStatsPrefs({ segment: v })}
+              />
+            </div>
+          </div>
+        </header>
+
+        <div class="issue-stats-chart">
+          <For each={st.rows.slice(0, 12)}>
+            {(r) => (
+              <div class="issue-stats-bar-row">
+                <div class="issue-stats-bar-xlabel muted">{r.sliceLabel}</div>
+                <div class="issue-stats-bar-track" aria-label={`${r.sliceLabel} ${r.total}`}>
+                  <div class="issue-stats-bar-fill" style={{ width: `${Math.round((r.total / max) * 100)}%` }} />
+                </div>
+                <div class="issue-stats-bar-val muted">{r.total}</div>
+              </div>
+            )}
+          </For>
+        </div>
+
+        <div class="issue-stats-table-wrap">
+          <table class="issue-stats-table">
+            <thead>
+              <tr>
+                <th>{STATS_SLICE_OPTIONS.find((o) => o.value === st.slice)?.label ?? "Slice"}</th>
+                <th>Issue count</th>
+                <For each={segs}>
+                  {(s) => <th class="muted">{s.label}</th>}
+                </For>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={st.rows}>
+                {(r) => (
+                  <tr>
+                    <td>{r.sliceLabel}</td>
+                    <td>{r.total}</td>
+                    <For each={segs}>
+                      {(s) => (
+                        <td class="muted">
+                          {r.segmentList.find((x) => x.key === s.key)?.value ?? 0}
+                        </td>
+                      )}
+                    </For>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
   function IssueRow(propsRow) {
     const issue = () => propsRow.issue;
     return (
@@ -1021,7 +1205,10 @@ export function IssueList(raw) {
           class="issue-row-main"
           onClick={() =>
             navigateTo(
-              withWorkspacePrefix(`/workspace/teams/${teamPathSeg()}/issues/${routeIssueSegment(issue(), projectMap()[issue().projectId])}`)
+              issueDetailPath(
+                props.workspacePathPrefix,
+                issueDisplayRef(issue(), projectMap()[issue().projectId])
+              )
             )
           }
         >
@@ -1106,8 +1293,9 @@ export function IssueList(raw) {
                             class="issue-board-card"
                             onClick={() =>
                               navigateTo(
-                                withWorkspacePrefix(
-                                  `/workspace/teams/${teamPathSeg()}/issues/${routeIssueSegment(issue, projectMap()[issue.projectId])}`
+                                issueDetailPath(
+                                  props.workspacePathPrefix,
+                                  issueDisplayRef(issue, projectMap()[issue.projectId])
                                 )
                               )
                             }
@@ -1307,29 +1495,31 @@ export function IssueList(raw) {
         <div class="issue-view-popover-title">布局</div>
         <div class="issue-view-layout-toggle">
           <Btn
-            variant={vp.viewMode === "list" ? "primary" : "default"}
+            variant={vp.viewMode === "list" ? "pressed" : "default"}
             onClick={() => updateViewPrefs({ viewMode: "list" })}
           >
             列表
           </Btn>
           <Btn
-            variant={vp.viewMode === "board" ? "primary" : "default"}
+            variant={vp.viewMode === "board" ? "pressed" : "default"}
             title="Ctrl B"
             onClick={() => updateViewPrefs({ viewMode: "board" })}
           >
             看板
           </Btn>
         </div>
-        <div class="issue-view-field">
-          <span class="issue-view-label">分组</span>
-          <Sel
-            class="fullw"
-            aria-label="List group dimension"
-            value={LIST_GROUP_KEYS_ALLOWED.has(vp.listGroupBy) ? vp.listGroupBy : "status"}
-            onChange={(v) => updateViewPrefs({ listGroupBy: v })}
-            options={LIST_GROUP_OPTIONS}
-          />
-        </div>
+        <Show when={vp.viewMode === "list"}>
+          <div class="issue-view-field">
+            <span class="issue-view-label">分组</span>
+            <Sel
+              class="fullw"
+              aria-label="List group dimension"
+              value={LIST_GROUP_KEYS_ALLOWED.has(vp.listGroupBy) ? vp.listGroupBy : "status"}
+              onChange={(v) => updateViewPrefs({ listGroupBy: v })}
+              options={LIST_GROUP_OPTIONS}
+            />
+          </div>
+        </Show>
         <div class="issue-view-field">
           <span class="issue-view-label">排序</span>
           <div class="issue-view-order-row">
@@ -1352,12 +1542,12 @@ export function IssueList(raw) {
             <span>显示空列</span>
             <ToggleSwitch checked={vp.showEmptyBoardColumns} onChange={(v) => updateViewPrefs({ showEmptyBoardColumns: v })} />
           </div>
-        ) : (
+        ) : vp.viewMode === "list" ? (
           <div class="issue-view-field issue-view-switch-row">
             <span>显示空分组</span>
             <ToggleSwitch checked={vp.showEmptyBoardColumns} onChange={(v) => updateViewPrefs({ showEmptyBoardColumns: v })} />
           </div>
-        )}
+        ) : null}
         <div class="issue-view-popover-title">显示属性</div>
         <div class="issue-display-prop-grid">
           <For each={DISP_KEYS}>
@@ -1425,15 +1615,6 @@ export function IssueList(raw) {
     return cyc?.name ?? "迭代";
   }
 
-  function epicLabel() {
-    const f = form();
-    if (!f.cycleEpicId) {
-      return "大需求";
-    }
-    const ep = cycleEpics().find((e) => e.id === f.cycleEpicId);
-    return ep?.name ?? "大需求";
-  }
-
   function assigneeLabel() {
     const f = form();
     if (!f.assigneeId) {
@@ -1462,10 +1643,10 @@ export function IssueList(raw) {
       </Show>
 
       <Show when={!props.issueId}>
-        <section class="issue-panel surface-card">
+        <section class="issue-panel surface-card dash-embed-panel">
           <div class="issue-toolbar issue-toolbar-extended">
             <div class="issue-toolbar-left">
-              <h2 class="panel-title issue-page-title">任务</h2>
+              <h2 class="panel-title issue-page-title">{props.mineIssues ? "我的任务" : "任务"}</h2>
               <div class="issue-range-tabs">
                 <button
                   type="button"
@@ -1506,23 +1687,39 @@ export function IssueList(raw) {
                 </Btn>
               </Popover>
               <Dropdown items={createMenuDropdownItems()}>
-                <Btn variant="primary" aria-label="打开新建任务菜单" class="btn-new-issue">
+                <Btn variant="create" aria-label="打开新建任务菜单" class="btn-new-issue">
                   新建
                 </Btn>
               </Dropdown>
             </div>
           </div>
           {error() ? <p class="error-text">{error()}</p> : null}
-          {!props.teamId ? (
+          {!props.teamId && !props.mineIssues ? (
             <p class="muted">请在团队中查看任务列表。</p>
-          ) : sortedIssues().length === 0 ? (
-            <p class="muted">暂无任务。</p>
-          ) : viewPrefs().viewMode === "board" ? (
-            renderBoard()
-          ) : groupedForList() ? (
-            renderGroupedListBody()
           ) : (
-            renderFlatListBody()
+            <div class="issue-list-stats-layout">
+              <div class="issue-list-main">
+                {sortedIssues().length === 0 ? (
+                  <p class="muted">暂无任务。</p>
+                ) : viewPrefs().viewMode === "board" ? (
+                  renderBoard()
+                ) : groupedForList() ? (
+                  renderGroupedListBody()
+                ) : (
+                  renderFlatListBody()
+                )}
+              </div>
+              <aside class="issue-stats-column dash-issue-rail" aria-label="任务统计与提示">
+                {renderStatsView()}
+                <section class="surface-card dash-widget dash-widget--compact" aria-label="使用提示">
+                  <h2 class="dash-widget-title">执行节奏</h2>
+                  <p class="dash-widget-body muted">
+                    使用「进行中 / 待办积压」快速收敛当前迭代；右侧图表可切换 Slice 与 Segment
+                    看在办分布。
+                  </p>
+                </section>
+              </aside>
+            </div>
           )}
 
           <Modal
@@ -1577,7 +1774,7 @@ export function IssueList(raw) {
                   variant="borderless"
                   aria-label="Issue description"
                   placeholder="添加描述…"
-                  rows={4}
+                  rows={5}
                   value={form().description}
                   onInput={(e) => mergeForm({ description: e.target.value })}
                 />
@@ -1706,7 +1903,7 @@ export function IssueList(raw) {
                         aria-label="Issue cycle"
                         style={{ minWidth: "220px" }}
                         value={form().cycleId || ""}
-                        onChange={(value) => mergeForm({ cycleId: value || null, cycleEpicId: null })}
+                        onChange={(value) => mergeForm({ cycleId: value || null })}
                         options={[
                           { value: "", label: "不关联迭代" },
                           ...cycles().map((c) => ({
@@ -1723,26 +1920,6 @@ export function IssueList(raw) {
                     </button>
                   </Popover>
 
-                  <Popover
-                    placement="bottomLeft"
-                    content={
-                      <Sel
-                        aria-label="大需求"
-                        style={{ minWidth: "220px" }}
-                        value={form().cycleEpicId || ""}
-                        onChange={(value) => mergeForm({ cycleEpicId: value || null })}
-                        options={[
-                          { value: "", label: form().cycleId ? "不关联大需求" : "请先选择迭代" },
-                          ...cycleEpics().map((e) => ({ value: e.id, label: e.name }))
-                        ]}
-                      />
-                    }
-                  >
-                    <button type="button" class="issue-create-pill" disabled={!form().cycleId}>
-                      <span class="issue-pill-prefix">◇</span>
-                      {epicLabel()}
-                    </button>
-                  </Popover>
                 </div>
               </div>
 
@@ -1750,13 +1927,14 @@ export function IssueList(raw) {
                 <Btn variant="text" disabled aria-label="附件（即将支持）" class="issue-create-attach-btn">
                   附件
                 </Btn>
-                <div class="issue-create-footer-center">
+                <div class="issue-create-footer-grow" aria-hidden="true" />
+                <div class="issue-create-submit-group">
                   <span class="issue-create-footer-label">继续创建</span>
                   <ToggleSwitch checked={createMore()} onChange={(v) => setCreateMore(v)} aria-label="继续创建" />
+                  <Btn variant="create" class="issue-create-submit" onClick={(e) => handleCreateIssue(e)}>
+                    {createModalSubmitLabel()}
+                  </Btn>
                 </div>
-                <Btn variant="primary" class="issue-create-submit" onClick={(e) => handleCreateIssue(e)}>
-                  {createModalSubmitLabel()}
-                </Btn>
               </footer>
             </div>
           </Modal>

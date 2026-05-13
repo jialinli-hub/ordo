@@ -1,0 +1,12 @@
+---
+description: SolidJS 受控输入与 props 同步，避免「一次只能输入一个字符」
+globs: apps/web/**/*.jsx
+---
+
+# 受控输入与 `createEffect` 同步
+
+若在子组件里用 `createSignal` 存草稿，并用 `createEffect(() => { setLocal(props.xxx) })` 从 props 回填：
+
+- 只要 `props.xxx` 在依赖追踪里变化（含父级重渲染时**新引用**的数组/对象），effect 会覆盖本地 state，输入框表现为**每键入一个字符就被重置**。
+
+**做法**：不要用「裸读 `props.initial`」作为唯一依赖。应使用 `on(() => 稳定键, () => { ... })`，稳定键例如 `cycleId + updatedAt`、或仅在 `onMount` + 明确的「服务端版本号」变化时再同步；从 props 读初始值时用 `untrack` 避免多余订阅。

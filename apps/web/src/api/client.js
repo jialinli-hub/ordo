@@ -3,7 +3,7 @@ function getAuthHeaders() {
   const workspaceId = localStorage.getItem("ordo_current_workspace_id");
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {})
+    ...(token && workspaceId ? { "X-Workspace-Id": workspaceId } : {})
   };
 }
 
@@ -64,7 +64,7 @@ async function readOptionalJsonMessage(response) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(buildUrl(path), {
+  const response = await globalThis.fetch(buildUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -115,4 +115,61 @@ export async function apiPut(path, body) {
     method: "PUT",
     body: JSON.stringify(body)
   });
+}
+
+/** 较大 JSON 体（如任务附件 base64），服务端对 `/attachments` 路由单独放宽 limit */
+export async function apiPostLargeJson(path, body) {
+  const response = await globalThis.fetch(buildUrl(path), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let message = `Request failed: ${response.status}`;
+    const fromBody = await readOptionalJsonMessage(response);
+    if (fromBody) {
+      message = fromBody;
+    }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  return readJsonBody(response);
+}
+
+/** 下载需鉴权的二进制（如附件），返回 Blob 与解析出的文件名 */
+export async function apiDownloadBlob(path) {
+  const response = await globalThis.fetch(buildUrl(path), {
+    headers: { ...getAuthHeaders() }
+  });
+  if (!response.ok) {
+    let message = `Request failed: ${response.status}`;
+    const fromBody = await readOptionalJsonMessage(response);
+    if (fromBody) {
+      message = fromBody;
+    }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  const cd = response.headers.get("Content-Disposition") || "";
+  let filename = "download";
+  const mStar = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (mStar) {
+    try {
+      filename = decodeURIComponent(mStar[1].trim());
+    } catch {
+      filename = mStar[1].trim();
+    }
+  } else {
+    const m = /filename="([^"]+)"/i.exec(cd);
+    if (m) {
+      filename = m[1];
+    }
+  }
+  const blob = await response.blob();
+  return { blob, filename };
 }

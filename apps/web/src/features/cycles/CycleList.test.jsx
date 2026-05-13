@@ -143,11 +143,11 @@ describe("CycleList", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "创建 Cycle" }));
-    fireEvent.input(screen.getByLabelText("Cycle name"), { target: { value: "Sprint 2" } });
+    fireEvent.input(screen.getByLabelText("迭代名称"), { target: { value: "Sprint 2" } });
     const sprint2Start = new Date(t + 30 * 86400000);
     const sprint2End = new Date(t + 50 * 86400000);
-    fireEvent.input(screen.getByLabelText("Cycle startsAt"), { target: { value: toDateInput(sprint2Start) } });
-    fireEvent.input(screen.getByLabelText("Cycle endsAt"), { target: { value: toDateInput(sprint2End) } });
+    fireEvent.input(screen.getByLabelText("开始日期"), { target: { value: toDateInput(sprint2Start) } });
+    fireEvent.input(screen.getByLabelText("结束日期"), { target: { value: toDateInput(sprint2End) } });
     const modal = screen.getByRole("dialog", { name: "创建 Cycle" });
     fireEvent.click(within(modal).getByRole("button", { name: /创\s*建/ }));
 

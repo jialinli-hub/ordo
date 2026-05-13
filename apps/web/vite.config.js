@@ -2,7 +2,13 @@ import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  ...(mode === "test" && {
+    define: {
+      /** Vitest 下内联 env；避免本机 .env 绝对地址 + Solid effect 叠出「Workspace 空」假失败 */
+      "import.meta.env.VITE_API_BASE_URL": JSON.stringify("")
+    }
+  }),
   plugins: [solid({ hot: !process.env.VITEST })],
   server: {
     proxy: {
@@ -19,4 +25,4 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/setupTests.js"
   }
-});
+}));

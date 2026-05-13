@@ -1,24 +1,5 @@
-:root {
-  --text: #18181b;
-  --text-h: #09090b;
-  --text-muted: #71717a;
-  --text-soft: #a1a1aa;
-  --bg: #f4f4f5;
-  --bg-app: #f4f4f5;
-  --bg-sidebar: #fafafa;
-  --bg-elevated: #ffffff;
-  --border: #e4e4e7;
-  --border-subtle: #f4f4f5;
-  --code-bg: #f4f4f5;
-  --accent: #5e6ad2;
-  --accent-hover: #4f5bc4;
-  --accent-muted: rgba(94, 106, 210, 0.16);
-  --accent-bg: rgba(94, 106, 210, 0.12);
-  --accent-border: rgba(94, 106, 210, 0.35);
-  --social-bg: rgba(244, 244, 245, 0.92);
-  --shadow:
-    rgba(15, 23, 42, 0.06) 0 10px 40px -12px, rgba(15, 23, 42, 0.05) 0 4px 16px -4px;
-
+/* 共享字体（不参与主题切换） */
+html {
   --font: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   --sans: var(--font);
@@ -27,9 +8,6 @@
 
   font: 13px/150% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light;
-  color: var(--text);
-  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -40,32 +18,140 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #18181b;
-    --text-h: #09090b;
-    --text-muted: #71717a;
-    --text-soft: #a1a1aa;
-    --bg: #f4f4f5;
-    --bg-app: #f4f4f5;
-    --bg-sidebar: #fafafa;
-    --bg-elevated: #ffffff;
-    --border: #e4e4e7;
-    --border-subtle: #f4f4f5;
-    --code-bg: #f4f4f5;
-    --accent: #5e6ad2;
-    --accent-hover: #4f5bc4;
-    --accent-muted: rgba(94, 106, 210, 0.16);
-    --accent-bg: rgba(94, 106, 210, 0.12);
-    --accent-border: rgba(94, 106, 210, 0.35);
-    --social-bg: rgba(244, 244, 245, 0.92);
-    --shadow:
-      rgba(15, 23, 42, 0.06) 0 10px 40px -12px, rgba(15, 23, 42, 0.05) 0 4px 16px -4px;
-  }
+html[data-theme="dark"] {
+  --text: #ececf1;
+  --text-h: #f6f7f8;
+  --text-muted: #9b9ba8;
+  --text-soft: #6f6f7c;
+  --bg: #0c0c0f;
+  --bg-app: #0c0c0f;
+  --bg-sidebar: #121215;
+  --bg-elevated: #17171c;
+  --bg-hover: color-mix(in srgb, #ffffff 8%, var(--bg-elevated));
+  --bg-hover-strong: color-mix(in srgb, #ffffff 11%, var(--bg-elevated));
+  --surface: var(--bg-elevated);
+  --surface-elevated: #1d1d22;
+  --border: #2a2a31;
+  --border-subtle: #212127;
+  --code-bg: #1f1f26;
+  --accent: #65e8d4;
+  --accent-hover: color-mix(in srgb, #65e8d4 88%, #000);
+  --accent-muted: rgba(101, 232, 212, 0.16);
+  --accent-bg: rgba(101, 232, 212, 0.1);
+  --accent-border: rgba(101, 232, 212, 0.38);
+  --accent-chart: #94a8ff;
+  --accent-chart-2: #f0a078;
+  --accent-ink: #06221a;
+  --accent-on-gradient: #06221a;
+  --social-bg: rgba(23, 23, 28, 0.92);
+  --row-list-hover: color-mix(in srgb, #ffffff 6%, transparent);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 26px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 22px 56px rgba(0, 0, 0, 0.55);
+  --shadow:
+    rgba(0, 0, 0, 0.45) 0 18px 50px -20px,
+    rgba(255, 255, 255, 0.04) 0 0 0 1px inset;
 
-  #social .button-icon {
-    filter: none;
-  }
+  --ordo-btn-ink: #52d4be;
+  --ordo-btn-blue: #52d4be;
+  --ordo-btn-mint: #7fffd4;
+  --btn-save-bg1: color-mix(in srgb, var(--ordo-btn-ink) 42%, var(--surface, #17171c));
+  --btn-save-bg2: color-mix(in srgb, var(--ordo-btn-ink) 78%, #0a1620);
+  --btn-save-bg1-hover: color-mix(in srgb, var(--ordo-btn-ink) 52%, var(--surface, #17171c));
+  --btn-save-bg2-hover: color-mix(in srgb, var(--ordo-btn-ink) 66%, #050a12);
+  --btn-save-border: color-mix(in srgb, var(--ordo-btn-ink) 55%, var(--border, #2a2a31));
+  --btn-save-text: #08221c;
+  --btn-create-bg1: color-mix(in srgb, var(--ordo-btn-mint) 28%, var(--surface, #17171c));
+  --btn-create-bg2: color-mix(in srgb, var(--ordo-btn-mint) 62%, var(--ordo-btn-ink));
+  --btn-create-bg1-hover: color-mix(in srgb, var(--ordo-btn-mint) 34%, var(--surface, #17171c));
+  --btn-create-bg2-hover: color-mix(in srgb, var(--ordo-btn-mint) 72%, var(--ordo-btn-ink));
+  --btn-create-border: color-mix(in srgb, var(--ordo-btn-mint) 52%, var(--ordo-btn-ink));
+  --btn-create-text: #06221a;
+  --btn-primary-bg1: var(--btn-save-bg1);
+  --btn-primary-bg2: var(--btn-save-bg2);
+  --btn-primary-bg1-hover: var(--btn-save-bg1-hover);
+  --btn-primary-bg2-hover: var(--btn-save-bg2-hover);
+  --btn-primary-border: var(--btn-save-border);
+  --btn-primary-text: var(--btn-save-text);
+  --btn-default-bg: color-mix(in srgb, #ffffff 7%, var(--surface-elevated, #1d1d22));
+  --btn-default-bg-hover: color-mix(in srgb, var(--accent) 9%, color-mix(in srgb, #ffffff 11%, var(--surface-elevated, #1d1d22)));
+  --btn-default-border: color-mix(in srgb, #ffffff 14%, var(--border, #2a2a31));
+  --btn-default-border-hover: color-mix(in srgb, var(--accent) 35%, var(--border, #2a2a31));
+  --btn-shell-text-link: color-mix(in srgb, var(--accent) 92%, #fff);
+  --btn-shell-text-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+  --btn-shell-text-hover-bg: color-mix(in srgb, var(--accent) 24%, transparent);
+
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+}
+
+html[data-theme="light"] {
+  --text: #18181b;
+  --text-h: #09090b;
+  --text-muted: #71717a;
+  --text-soft: #a1a1aa;
+  --bg: #f4f4f5;
+  --bg-app: #f4f4f5;
+  --bg-sidebar: #fafafa;
+  --bg-elevated: #ffffff;
+  --bg-hover: color-mix(in srgb, var(--text) 6%, var(--bg-elevated));
+  --bg-hover-strong: color-mix(in srgb, var(--text) 9%, var(--bg-elevated));
+  --surface: #ffffff;
+  --surface-elevated: #f4f4f5;
+  --border: #e4e4e7;
+  --border-subtle: #f4f4f5;
+  --code-bg: #f4f4f5;
+  --accent: #14b8a6;
+  --accent-hover: color-mix(in srgb, #14b8a6 82%, #0f766e);
+  --accent-muted: rgba(20, 184, 166, 0.14);
+  --accent-bg: rgba(20, 184, 166, 0.1);
+  --accent-border: rgba(20, 184, 166, 0.35);
+  --accent-chart: #6366f1;
+  --accent-chart-2: #ea580c;
+  --accent-ink: #ffffff;
+  --accent-on-gradient: #0f172a;
+  --social-bg: rgba(244, 244, 245, 0.95);
+  --row-list-hover: color-mix(in srgb, var(--text) 4%, var(--bg-elevated));
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 18px 52px rgba(15, 23, 42, 0.14);
+  --shadow:
+    rgba(15, 23, 42, 0.06) 0 10px 40px -12px,
+    rgba(15, 23, 42, 0.05) 0 4px 16px -4px;
+
+  --ordo-btn-ink: #0f766e;
+  --ordo-btn-blue: #14b8a6;
+  --ordo-btn-mint: #2dd4bf;
+  --btn-save-bg1: color-mix(in srgb, var(--ordo-btn-ink) 22%, #fff);
+  --btn-save-bg2: color-mix(in srgb, var(--ordo-btn-ink) 78%, #115e59);
+  --btn-save-bg1-hover: color-mix(in srgb, var(--ordo-btn-ink) 30%, #fff);
+  --btn-save-bg2-hover: color-mix(in srgb, var(--ordo-btn-ink) 88%, #0f3d38);
+  --btn-save-border: color-mix(in srgb, var(--ordo-btn-ink) 42%, #cbd5e1);
+  --btn-save-text: #ffffff;
+  --btn-create-bg1: color-mix(in srgb, var(--ordo-btn-mint) 24%, #fff);
+  --btn-create-bg2: color-mix(in srgb, var(--ordo-btn-mint) 55%, var(--ordo-btn-ink));
+  --btn-create-bg1-hover: color-mix(in srgb, var(--ordo-btn-mint) 32%, #fff);
+  --btn-create-bg2-hover: color-mix(in srgb, var(--ordo-btn-mint) 48%, var(--ordo-btn-ink));
+  --btn-create-border: color-mix(in srgb, var(--ordo-btn-mint) 38%, var(--ordo-btn-ink));
+  --btn-create-text: #ffffff;
+  --btn-primary-bg1: var(--btn-save-bg1);
+  --btn-primary-bg2: var(--btn-save-bg2);
+  --btn-primary-bg1-hover: var(--btn-save-bg1-hover);
+  --btn-primary-bg2-hover: var(--btn-save-bg2-hover);
+  --btn-primary-border: var(--btn-save-border);
+  --btn-primary-text: var(--btn-save-text);
+  --btn-default-bg: color-mix(in srgb, var(--text) 4%, #fff);
+  --btn-default-bg-hover: color-mix(in srgb, var(--accent) 10%, #fff);
+  --btn-default-border: color-mix(in srgb, var(--text) 12%, var(--border));
+  --btn-default-border-hover: color-mix(in srgb, var(--accent) 45%, var(--border));
+  --btn-shell-text-link: #0f766e;
+  --btn-shell-text-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --btn-shell-text-hover-bg: color-mix(in srgb, var(--accent) 20%, transparent);
+
+  color-scheme: light;
+  color: var(--text);
+  background: var(--bg);
 }
 
 body {
@@ -82,9 +168,12 @@ body {
   text-align: left;
   border-inline: 0;
   min-height: 100svh;
+  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 h1,

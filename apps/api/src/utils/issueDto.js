@@ -14,7 +14,8 @@ function mapIssueToApi(
     includeComments = false,
     includeActivity = false,
     includeSubtasks = false,
-    includeParent = false
+    includeParent = false,
+    includeAttachments = false
   } = {}
 ) {
   if (!row) {
@@ -55,6 +56,18 @@ function mapIssueToApi(
         }
       : undefined;
 
+  let attachments;
+  if (includeAttachments) {
+    attachments = (row.attachments || []).map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      contentType: a.contentType,
+      size: a.size,
+      uploadedById: a.uploadedById,
+      createdAt: iso(a.createdAt)
+    }));
+  }
+
   if (!includeComments) {
     comments = undefined;
   }
@@ -85,7 +98,6 @@ function mapIssueToApi(
     projectId: row.projectId,
     parentIssueId: row.parentIssueId ?? null,
     cycleId: row.cycleId,
-    cycleEpicId: row.cycleEpicId ?? null,
     title: row.title,
     description: row.description ?? null,
     status: row.status,
@@ -105,7 +117,8 @@ function mapIssueToApi(
     ...(comments !== undefined ? { comments } : {}),
     ...(activity !== undefined ? { activity } : {}),
     ...(subtasks !== undefined ? { subtasks } : {}),
-    ...(parent !== undefined ? { parent } : {})
+    ...(parent !== undefined ? { parent } : {}),
+    ...(includeAttachments ? { attachments } : {})
   };
 }
 

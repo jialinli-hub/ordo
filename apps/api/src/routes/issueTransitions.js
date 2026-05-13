@@ -3,6 +3,7 @@ const { prisma } = require("../repositories/prisma");
 const { transitionIssueStatus } = require("../domain/issueStateMachine");
 const { mapIssueToApi } = require("../utils/issueDto");
 const { findIssueByRouteParam } = require("../services/issueRouteLookup");
+const { invalidateWorkspace } = require("../services/workspaceReadCache");
 
 const issueTransitionsRouter = express.Router();
 
@@ -23,6 +24,7 @@ issueTransitionsRouter.patch("/:id/status", async (req, res) => {
       where: { id: row.id },
       data: { status: nextVal, updatedAt: new Date() }
     });
+    invalidateWorkspace(updated.workspaceId);
     return res.json(mapIssueToApi(updated));
   } catch {
     return res.status(400).json({ message: "Invalid status transition" });

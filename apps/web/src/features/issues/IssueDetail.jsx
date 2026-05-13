@@ -2,7 +2,8 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import "dayjs/locale/zh-cn";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/client";
+import { apiDelete, apiDownloadBlob, apiGet, apiPatch, apiPost, apiPostLargeJson } from "../../api/client";
+import { issueDetailPath } from "../../lib/appPaths.js";
 import { teamSegmentForUrl } from "../../lib/teamSlug";
 import {
   Btn,
@@ -60,6 +61,140 @@ function formatEstimateHoursCell(h) {
   return String(Number(n.toFixed(2)));
 }
 
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 从 Issue 动态中抽取 GitLab 事件，供「开发与合并」面板展示（对齐 Linear 的 Development 可视化，而非仅收 Webhook）。
+ * @param {{ type: string, id?: string, createdAt: string, payload?: Record<string, unknown> }} row
+ */
+function normalizeGitlabDevCard(row, idx) {
+  const p = row.payload && typeof row.payload === "object" ? row.payload : {};
+  const at = row.createdAt;
+  const key = `${row.type}-${row.id ?? idx}`;
+  /** @type {{ href: string, label: string }[]} */
+  const links = [];
+
+  if (row.type === "workflow_automation") {
+    const mr = p.webUrl != null ? String(p.webUrl) : "";
+    if (mr && /^https?:\/\//i.test(mr)) {
+      links.push({ href: mr, label: "在 GitLab 打开" });
+    }
+    const trig = p.trigger != null ? String(p.trigger) : "GitLab";
+    const st = p.appliedStatus != null ? String(p.appliedStatus) : p.desiredStatus != null ? String(p.desiredStatus) : "";
+    const tb = p.targetBranch != null ? String(p.targetBranch) : "";
+    return {
+      key,
+      at,
+      primaryLabel: st ? `工作流：${trig} → 状态 ${st}` : `工作流：${trig}`,
+      subline: tb ? `目标分支：${tb}` : null,
+      links
+    };
+  }
+
+  if (p.eventKind === "merge_request") {
+    const title = p.title != null ? String(p.title) : "Merge request";
+    const u = p.url != null ? String(p.url) : "";
+    if (u && /^https?:\/\//i.test(u)) {
+      links.push({ href: u, label: "合并请求" });
+    }
+    const src = p.sourceBranch != null ? String(p.sourceBranch) : "";
+    const tgt = p.targetBranch != null ? String(p.targetBranch) : "";
+    const br = [src, tgt].filter(Boolean).join(" → ");
+    const proj =
+      p.project && typeof p.project === "object"
+        ? String(p.project.path_with_namespace || p.project.name || "").trim()
+        : "";
+    return {
+      key,
+      at,
+      primaryLabel: title.length > 120 ? `${title.slice(0, 119)}…` : title,
+      subline: [proj, br].filter(Boolean).join(" · ") || null,
+      links
+    };
+  }
+
+  if (p.eventKind === "push") {
+    const ref = String(p.ref || "").replace(/^refs\/heads\//, "");
+    const n = Array.isArray(p.commits) ? p.commits.length : Number(p.totalCommitsCount) || 0;
+    const cu = p.compareUrl != null ? String(p.compareUrl) : "";
+    if (cu && /^https?:\/\//i.test(cu)) {
+      links.push({ href: cu, label: "Compare / 变更范围" });
+    }
+    const commits = Array.isArray(p.commits) ? p.commits : [];
+    for (const c of commits.slice(0, 5)) {
+      const href = c?.url != null ? String(c.url) : "";
+      if (href && /^https?:\/\//i.test(href)) {
+        const lab = (c.title || c.message || c.id || "commit").toString().split("\n")[0].slice(0, 56);
+        links.push({ href, label: lab.length >= 56 ? `${lab}…` : lab });
+      }
+    }
+    const proj =
+      p.project && typeof p.project === "object"
+        ? String(p.project.path_with_namespace || p.project.name || "").trim()
+        : "";
+    return {
+      key,
+      at,
+      primaryLabel: `推送到 ${ref || "?"}`,
+      subline: proj ? `${proj} · ${n} 条提交` : `${n} 条提交`,
+      links
+    };
+  }
+
+  if (p.eventKind === "note") {
+    const body = p.body != null ? String(p.body) : "";
+    const projUrl =
+      p.project && typeof p.project === "object" && p.project.web_url ? String(p.project.web_url) : "";
+    if (projUrl && /^https?:\/\//i.test(projUrl)) {
+      links.push({ href: projUrl, label: "仓库" });
+    }
+    return {
+      key,
+      at,
+      primaryLabel: "MR / Issue 评论",
+      subline: body ? body.replace(/\s+/g, " ").trim().slice(0, 160) : null,
+      links
+    };
+  }
+
+  const projUrl =
+    p.project && typeof p.project === "object" && p.project.web_url ? String(p.project.web_url) : "";
+  if (projUrl && /^https?:\/\//i.test(projUrl)) {
+    links.push({ href: projUrl, label: "仓库" });
+  }
+  return {
+    key,
+    at,
+    primaryLabel: "GitLab 事件",
+    subline: p.eventKind != null ? String(p.eventKind) : null,
+    links
+  };
+}
+
+function formatBytes(n) {
+  if (n == null || !Number.isFinite(Number(n))) {
+    return "—";
+  }
+  const x = Number(n);
+  if (x < 1024) {
+    return `${x} B`;
+  }
+  if (x < 1024 * 1024) {
+    return `${(x / 1024).toFixed(1)} KB`;
+  }
+  return `${(x / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+  }
+  return btoa(binary);
+}
+
 export function IssueDetail(props) {
   const teamName = () => props.teamName ?? "";
   const teamId = () => props.teamId;
@@ -75,6 +210,17 @@ export function IssueDetail(props) {
   const cycles = () => props.cycles ?? [];
   const members = () => props.members ?? [];
 
+  function ensureCurrentOption(options, currentValue, currentLabel) {
+    const v = currentValue == null ? "" : String(currentValue);
+    if (!v) {
+      return options;
+    }
+    if ((options || []).some((o) => String(o.value) === v)) {
+      return options;
+    }
+    return [{ value: v, label: currentLabel || v }, ...(options || [])];
+  }
+
   function withWorkspacePrefix(path) {
     return `${props.workspacePathPrefix ?? ""}${path}`;
   }
@@ -88,9 +234,11 @@ export function IssueDetail(props) {
   const [labelJoined, setLabelJoined] = createSignal("");
   const [estimateDraft, setEstimateDraft] = createSignal("");
   const [descFontPx, setDescFontPx] = createSignal(13);
-  const [cycleEpics, setCycleEpics] = createSignal([]);
   const [subtaskTitle, setSubtaskTitle] = createSignal("");
   const [commentSending, setCommentSending] = createSignal(false);
+  const [attachmentUploading, setAttachmentUploading] = createSignal(false);
+
+  let attachmentFileInput;
 
   const teamPathSeg = () => teamSegmentForUrl({ name: teamName(), id: teamId() });
 
@@ -121,38 +269,14 @@ export function IssueDetail(props) {
 
   createEffect(() => {
     const i = issue();
-    const cid = i?.cycleId;
-    if (!cid) {
-      setCycleEpics([]);
-      return;
-    }
-    let alive = true;
-    apiGet(`/api/cycles/${encodeURIComponent(cid)}/epics`)
-      .then((d) => {
-        if (alive) {
-          setCycleEpics(d.items ?? []);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setCycleEpics([]);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  });
-
-  createEffect(() => {
-    const i = issue();
     const key = routeIssueKey();
     if (loading() || !i || !i.issues_id || key !== i.id) {
       return;
     }
-    const path = withWorkspacePrefix(
-      `/workspace/teams/${teamPathSeg()}/issues/${encodeURIComponent(i.issues_id)}`
-    );
-    if (window.location.pathname !== path) {
+    const path = issueDetailPath(props.workspacePathPrefix, i.issues_id);
+    const cur = window.location.pathname.replace(/\/$/, "");
+    const want = path.replace(/\/$/, "");
+    if (cur !== want) {
       navigateTo(path);
     }
   });
@@ -194,16 +318,77 @@ export function IssueDetail(props) {
   }
 
   function activitySentence(row) {
-    const who = memberName(row.userId);
     const t = dayjs(row.createdAt).fromNow();
+    const who =
+      row.type === "gitlab_event"
+        ? "GitLab"
+        : row.type === "workflow_automation"
+          ? "GitLab"
+          : row.userId
+            ? memberName(row.userId)
+            : "系统";
     if (row.type === "issue_created") {
-      return `${who} 创建了任务 · ${t}`;
+      return `${memberName(row.userId)} 创建了任务 · ${t}`;
     }
     if (row.type === "comment_created") {
       return `${who} 发表了评论 · ${t}`;
     }
+    if (row.type === "attachment_created") {
+      const name = row?.payload?.fileName || "文件";
+      return `${who} 上传了附件「${name}」 · ${t}`;
+    }
+    if (row.type === "attachment_deleted") {
+      const name = row?.payload?.fileName || "文件";
+      return `${who} 删除了附件「${name}」 · ${t}`;
+    }
+    if (row.type === "gitlab_event") {
+      const p = row.payload || {};
+      if (p.eventKind === "push") {
+        const ref = String(p.ref || "").replace(/^refs\/heads\//, "");
+        const n = Array.isArray(p.commits) ? p.commits.length : p.totalCommitsCount || 0;
+        const proj = p.project?.path_with_namespace || p.project?.name || "";
+        const projBit = proj ? `${proj} · ` : "";
+        return `${projBit}推送 ${ref || "?"}（${n} 条提交）· ${t}`;
+      }
+      if (p.eventKind === "merge_request") {
+        const title = p.title || "Merge request";
+        return `合并请求：${String(title).slice(0, 80)}${String(title).length > 80 ? "…" : ""} · ${t}`;
+      }
+      if (p.eventKind === "note") {
+        return `GitLab 评论 · ${t}`;
+      }
+      return `GitLab 事件 · ${t}`;
+    }
+    if (row.type === "workflow_automation") {
+      const p = row.payload || {};
+      const want = p.appliedStatus || p.desiredStatus || "";
+      return `GitLab 工作流：${p.trigger || "规则"} → ${want} · ${t}`;
+    }
     if (row.type === "issue_updated") {
-      return `${who} 更新了任务 · ${t}`;
+      const changes = row?.payload?.changes;
+      if (changes && typeof changes === "object") {
+        const labelMap = {
+          title: "标题",
+          description: "描述",
+          status: "状态",
+          priority: "优先级",
+          type: "类型",
+          estimateHours: "工时",
+          assigneeId: "负责人",
+          labels: "标签",
+          dueDate: "截止日期",
+          projectId: "项目",
+          cycleId: "迭代",
+          teamId: "团队"
+        };
+        const keys = Object.keys(changes).filter((k) => labelMap[k]);
+        if (keys.length) {
+          const shown = keys.slice(0, 4).map((k) => labelMap[k]).join("、");
+          const more = keys.length > 4 ? `等 ${keys.length} 项` : "";
+          return `${memberName(row.userId)} 更新了 ${shown}${more} · ${t}`;
+        }
+      }
+      return `${memberName(row.userId)} 更新了任务 · ${t}`;
     }
     return `${who} · ${t}`;
   }
@@ -215,6 +400,72 @@ export function IssueDetail(props) {
       props.onIssueUpdated?.(updated);
     } catch {
       setDetailError("保存失败");
+    }
+  }
+
+  async function uploadAttachmentFile(file) {
+    if (!file) {
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setDetailError(`附件不能超过 ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB`);
+      return;
+    }
+    setAttachmentUploading(true);
+    setDetailError("");
+    try {
+      const buf = await file.arrayBuffer();
+      const dataBase64 = arrayBufferToBase64(buf);
+      await apiPostLargeJson(`/api/issues/${encodeURIComponent(routeIssueKey())}/attachments`, {
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        dataBase64
+      });
+      await reload();
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "上传附件失败");
+    } finally {
+      setAttachmentUploading(false);
+    }
+  }
+
+  function onAttachmentFileInputChange(ev) {
+    const file = ev.currentTarget.files?.[0];
+    ev.currentTarget.value = "";
+    void uploadAttachmentFile(file);
+  }
+
+  async function downloadAttachment(att) {
+    setDetailError("");
+    try {
+      const path = `/api/issues/${encodeURIComponent(routeIssueKey())}/attachments/${encodeURIComponent(att.id)}`;
+      const { blob, filename } = await apiDownloadBlob(path);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || att.fileName || "download";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "下载附件失败");
+    }
+  }
+
+  async function deleteAttachment(att) {
+    if (!window.confirm(`确定删除附件「${att.fileName}」？`)) {
+      return;
+    }
+    setDetailError("");
+    try {
+      await apiDelete(
+        `/api/issues/${encodeURIComponent(routeIssueKey())}/attachments/${encodeURIComponent(att.id)}`
+      );
+      await reload();
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "删除附件失败");
     }
   }
 
@@ -237,9 +488,7 @@ export function IssueDetail(props) {
   }
 
   function issueDetailHref(refSegment) {
-    return withWorkspacePrefix(
-      `/workspace/teams/${teamPathSeg()}/issues/${encodeURIComponent(refSegment)}`
-    );
+    return issueDetailPath(props.workspacePathPrefix, refSegment);
   }
 
   async function addSubtask() {
@@ -316,8 +565,22 @@ export function IssueDetail(props) {
             )
           );
 
+          const gitlabDevCards = createMemo(() => {
+            const raw = issueAcc()?.activity || [];
+            const rows = raw.filter((r) => r.type === "gitlab_event" || r.type === "workflow_automation");
+            rows.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            return rows.map((r, i) => normalizeGitlabDevCard(r, i));
+          });
+
           return (
             <div class="issue-detail-shell">
+              <input
+                type="file"
+                style={{ display: "none" }}
+                aria-hidden="true"
+                ref={attachmentFileInput}
+                onChange={onAttachmentFileInputChange}
+              />
               <header class="issue-detail-topbar">
                 <div class="issue-detail-bc">
                   <Btn
@@ -399,6 +662,58 @@ export function IssueDetail(props) {
                     />
                   </div>
 
+                  <section class="issue-detail-attachments" aria-label="任务附件">
+                    <div class="issue-attachments-toolbar">
+                      <h3 class="issue-detail-section-title" style={{ margin: 0 }}>
+                        附件
+                      </h3>
+                      <Btn
+                        type="button"
+                        variant="create"
+                        loading={attachmentUploading()}
+                        disabled={attachmentUploading()}
+                        onClick={() => attachmentFileInput?.click()}
+                      >
+                        上传
+                      </Btn>
+                    </div>
+                    <ul class="issue-attachments-list">
+                      <For each={issueAcc()?.attachments ?? []}>
+                        {(att) => (
+                          <li class="issue-attachment-row">
+                            <div class="issue-attachment-meta">
+                              <button
+                                type="button"
+                                class="issue-attachment-name"
+                                onClick={() => void downloadAttachment(att)}
+                              >
+                                {att.fileName}
+                              </button>
+                              <div class="muted issue-attachment-size">
+                                {formatBytes(att.size)} · {memberName(att.uploadedById)} ·{" "}
+                                {dayjs(att.createdAt).fromNow()}
+                              </div>
+                            </div>
+                            <Btn
+                              type="button"
+                              variant="text"
+                              class="btn-ordo-danger-text"
+                              aria-label={`删除 ${att.fileName}`}
+                              onClick={() => void deleteAttachment(att)}
+                            >
+                              删除
+                            </Btn>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                    <Show when={(issueAcc()?.attachments ?? []).length === 0}>
+                      <p class="muted" style={{ "margin-top": "4px" }}>
+                        暂无附件，可使用「上传」或评论旁的「附件」添加。
+                      </p>
+                    </Show>
+                  </section>
+
                   <section class="issue-detail-subtasks">
                     <div class="issue-detail-section-head">
                       <h3 class="issue-detail-section-title">子任务</h3>
@@ -432,7 +747,7 @@ export function IssueDetail(props) {
                             }
                           }}
                         />
-                        <Btn type="button" variant="default" onClick={() => void addSubtask()}>
+                        <Btn type="button" variant="create" onClick={() => void addSubtask()}>
                           添加
                         </Btn>
                       </div>
@@ -487,6 +802,41 @@ export function IssueDetail(props) {
                     </Show>
                   </section>
 
+                  <Show when={gitlabDevCards().length > 0}>
+                    <section class="issue-gitlab-dev surface-card" aria-label="GitLab 开发与合并">
+                      <h3 class="issue-detail-section-title">开发与合并</h3>
+                      <p class="muted issue-gitlab-dev-intro">
+                        与 Linear 的 Development 类似：展示本任务在 GitLab 上的推送、合并请求及工作流联动；数据由团队/工作区配置的
+                        Webhook 同步写入。
+                      </p>
+                      <ul class="issue-gitlab-dev-list">
+                        <For each={gitlabDevCards()}>
+                          {(card) => (
+                            <li class="issue-gitlab-dev-card">
+                              <div class="issue-gitlab-dev-card-head">{card.primaryLabel}</div>
+                              {card.subline ? <div class="muted issue-gitlab-dev-meta">{card.subline}</div> : null}
+                              <div class="issue-gitlab-dev-links">
+                                <For each={card.links}>
+                                  {(lnk) => (
+                                    <a
+                                      class="issue-gitlab-dev-link"
+                                      href={lnk.href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {lnk.label}
+                                    </a>
+                                  )}
+                                </For>
+                              </div>
+                              <div class="muted issue-gitlab-dev-time">{dayjs(card.at).fromNow()}</div>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </section>
+                  </Show>
+
                   <section class="issue-detail-activity">
                     <div class="issue-detail-section-head">
                       <h3 class="issue-detail-section-title">动态</h3>
@@ -527,11 +877,17 @@ export function IssueDetail(props) {
                         }}
                       />
                       <div class="issue-comment-compose-actions">
-                        <Btn variant="text" disabled aria-label="附件">
+                        <Btn
+                          variant="text"
+                          aria-label="上传附件"
+                          loading={attachmentUploading()}
+                          disabled={attachmentUploading()}
+                          onClick={() => attachmentFileInput?.click()}
+                        >
                           附件
                         </Btn>
                         <Btn
-                          variant="primary"
+                          variant="save"
                           loading={commentSending()}
                           disabled={!commentBody().trim()}
                           onClick={() => void submitComment()}
@@ -598,41 +954,42 @@ export function IssueDetail(props) {
                         class="issue-prop-select"
                         aria-label="负责人"
                         value={issueAcc()?.assigneeId || ""}
-                        options={[
-                          { value: "", label: "未指派" },
-                          ...members().map((m) => ({ value: m.userId, label: m.name }))
-                        ]}
+                        options={(() => {
+                          const base = [
+                            { value: "", label: "未指派" },
+                            ...members().map((m) => ({
+                              value: m.userId,
+                              label: m.name || m.email || m.userId
+                            }))
+                          ];
+                          const cur = issueAcc()?.assigneeId || "";
+                          return ensureCurrentOption(base, cur, memberName(cur));
+                        })()}
                         onChange={(v) => patchIssue({ assigneeId: v || null })}
                       />
                     </div>
-                    <Popover
-                      placement="bottomLeft"
-                      content={
-                        <Inp
-                          type="number"
-                          min={0}
-                          step={0.5}
-                          style={{ width: "160px" }}
-                          placeholder="工时（小时）"
-                          value={estimateDraft()}
-                          onInput={(e) => setEstimateDraft(e.target.value)}
-                          onBlur={() => {
-                            const raw = estimateDraft().trim();
-                            const n = Number(raw);
-                            patchIssue({
-                              estimateHours: raw === "" || !Number.isFinite(n) ? null : n
-                            });
-                          }}
-                        />
-                      }
-                    >
-                      <button type="button" class="issue-prop-row-btn">
-                        <span class="issue-prop-kicker issue-prop-kicker--mono" aria-hidden>
-                          h
-                        </span>
-                        <span>{issueAcc()?.estimateHours != null ? `${issueAcc().estimateHours} h` : "预估工时"}</span>
-                      </button>
-                    </Popover>
+                    <div class="issue-prop-row">
+                      <span class="issue-prop-kicker issue-prop-kicker--mono" aria-hidden>
+                        h
+                      </span>
+                      <Inp
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        placeholder="工时"
+                        value={estimateDraft()}
+                        onInput={(e) => setEstimateDraft(e.target.value)}
+                        onBlur={() => {
+                          const raw = estimateDraft().trim();
+                          const n = Number(raw);
+                          patchIssue({
+                            estimateHours: raw === "" || !Number.isFinite(n) ? null : n
+                          });
+                        }}
+                        style={{ flex: 1, width: "100%" }}
+                        aria-label="预估工时"
+                      />
+                    </div>
                     <div class="issue-prop-row">
                       <span class="issue-prop-kicker" aria-hidden>
                         ↻
@@ -641,27 +998,16 @@ export function IssueDetail(props) {
                         class="issue-prop-select"
                         aria-label="迭代"
                         value={issueAcc()?.cycleId || ""}
-                        options={[
-                          { value: "", label: "不关联" },
-                          ...cycles().map((c) => ({ value: c.id, label: c.name }))
-                        ]}
-                        onChange={(v) => patchIssue({ cycleId: v || null, cycleEpicId: null })}
-                      />
-                    </div>
-                    <div class="issue-prop-row">
-                      <span class="issue-prop-kicker" aria-hidden>
-                        ◇
-                      </span>
-                      <Sel
-                        class="issue-prop-select"
-                        aria-label="大需求"
-                        value={issueAcc()?.cycleEpicId || ""}
-                        disabled={!issueAcc()?.cycleId}
-                        options={[
-                          { value: "", label: issueAcc()?.cycleId ? "不关联大需求" : "请先关联迭代" },
-                          ...cycleEpics().map((e) => ({ value: e.id, label: e.name }))
-                        ]}
-                        onChange={(v) => patchIssue({ cycleEpicId: v || null })}
+                        options={(() => {
+                          const base = [
+                            { value: "", label: "不关联" },
+                            ...cycles().map((c) => ({ value: c.id, label: c.name }))
+                          ];
+                          const cur = issueAcc()?.cycleId || "";
+                          const curLabel = cur ? cycles().find((c) => c.id === cur)?.name || "迭代" : "";
+                          return ensureCurrentOption(base, cur, curLabel);
+                        })()}
+                        onChange={(v) => patchIssue({ cycleId: v || null })}
                       />
                     </div>
                   </div>
@@ -699,7 +1045,11 @@ export function IssueDetail(props) {
                       class="issue-project-select"
                       aria-label="项目"
                       value={issueAcc()?.projectId}
-                      options={projects().map((p) => ({ value: p.id, label: p.name }))}
+                      options={ensureCurrentOption(
+                        projects().map((p) => ({ value: p.id, label: p.name })),
+                        issueAcc()?.projectId,
+                        project()?.name || "项目"
+                      )}
                       onChange={(v) => patchIssue({ projectId: v })}
                     />
                   </div>
@@ -720,7 +1070,7 @@ export function IssueDetail(props) {
                     <Btn variant="default" onClick={() => setDeleteOpen(false)}>
                       取消
                     </Btn>
-                    <Btn variant="primary" class="btn-ordo-primary" onClick={() => confirmDelete()}>
+                    <Btn variant="danger" onClick={() => confirmDelete()}>
                       删除
                     </Btn>
                   </>

@@ -36,6 +36,8 @@ function pickRandomTeamAccentColor() {
 function mapTeamRow(team) {
   const labelsRaw = team.issueLabelsJson;
   const statusesRaw = team.issueStatusesJson;
+  const workflowRaw = team.workflowAutomationsJson;
+  const notifyRaw = team.notificationSettingsJson;
   return {
     id: team.id,
     workspaceId: team.workspaceId,
@@ -45,8 +47,36 @@ function mapTeamRow(team) {
     iterationDurationDays: team.iterationDurationDays ?? 14,
     cooldownDays: team.cooldownDays ?? 2,
     iterationStartWeekday: team.iterationStartWeekday ?? 1,
+    autoCreateDailyCycles: team.autoCreateDailyCycles !== false,
     issueLabels: Array.isArray(labelsRaw) ? labelsRaw : DEFAULT_LABELS,
-    issueStatuses: Array.isArray(statusesRaw) ? statusesRaw : DEFAULT_STATUSES
+    issueStatuses: Array.isArray(statusesRaw) ? statusesRaw : DEFAULT_STATUSES,
+    workflowAutomations:
+      workflowRaw && typeof workflowRaw === "object"
+        ? workflowRaw
+        : {
+            gitlab: {
+              enabled: false,
+              secret: "",
+              rules: {
+                onDraftOpen: "in_progress",
+                onPrOpen: "in_progress",
+                onPrActivity: "in_progress",
+                onReadyForMerge: "in_review",
+                onMerge: "done"
+              },
+              branchRules: []
+            }
+          },
+    notificationSettings:
+      notifyRaw && typeof notifyRaw === "object"
+        ? notifyRaw
+        : {
+            dingtalk: {
+              enabled: false,
+              botWebhookUrl: "",
+              botSecret: ""
+            }
+          }
   };
 }
 
@@ -173,8 +203,11 @@ teamsRouter.patch("/:teamId", async (req, res) => {
     iterationDurationDays,
     cooldownDays,
     iterationStartWeekday,
+    autoCreateDailyCycles,
     issueLabels,
-    issueStatuses
+    issueStatuses,
+    workflowAutomations,
+    notificationSettings
   } = req.body ?? {};
 
   const data = {};
@@ -239,6 +272,12 @@ teamsRouter.patch("/:teamId", async (req, res) => {
     }
     data.iterationStartWeekday = Math.round(n);
   }
+  if (autoCreateDailyCycles !== undefined) {
+    if (typeof autoCreateDailyCycles !== "boolean") {
+      return res.status(422).json({ message: "invalid autoCreateDailyCycles" });
+    }
+    data.autoCreateDailyCycles = autoCreateDailyCycles;
+  }
   if (issueLabels !== undefined) {
     if (!Array.isArray(issueLabels)) {
       return res.status(422).json({ message: "issueLabels must be array" });
@@ -250,6 +289,97 @@ teamsRouter.patch("/:teamId", async (req, res) => {
       return res.status(422).json({ message: "issueStatuses must be array" });
     }
     data.issueStatusesJson = issueStatuses;
+  }
+
+  if (workflowAutomations !== undefined) {
+    if (workflowAutomations == null) {
+      data.workflowAutomationsJson = null;
+    } else if (typeof workflowAutomations !== "object") {
+      return res.status(422).json({ message: "workflowAutomations must be object" });
+    } else {
+      const w = workflowAutomations;
+      const gl = w.gitlab;
+      if (gl != null && typeof gl !== "object") {
+        return res.status(422).json({ message: "workflowAutomations.gitlab must be object" });
+      }
+      if (gl) {
+        if (gl.secret !== undefined && gl.secret != null && String(gl.secret).length > 256) {
+          return res.status(422).json({ message: "workflowAutomations.gitlab.secret too long" });
+        }
+        const rules = gl.rules;
+        const allowedStatuses = new Set(["todo", "in_progress", "in_review", "done"]);
+        if (rules != null) {
+          if (typeof rules !== "object") {
+            return res.status(422).json({ message: "workflowAutomations.gitlab.rules must be object" });
+          }
+          for (const k of ["onDraftOpen", "onPrOpen", "onPrActivity", "onReadyForMerge", "onMerge"]) {
+            if (rules[k] != null && !allowedStatuses.has(String(rules[k]))) {
+              return res.status(422).json({ message: `workflowAutomations.gitlab.rules.${k} invalid` });
+            }
+          }
+        }
+        const br = gl.branchRules;
+        if (br != null) {
+          if (!Array.isArray(br)) {
+            return res.status(422).json({ message: "workflowAutomations.gitlab.branchRules must be array" });
+          }
+          for (const row of br) {
+            if (!row || typeof row !== "object") {
+              return res.status(422).json({ message: "workflowAutomations.gitlab.branchRules row invalid" });
+            }
+            if (!row.targetBranchRegex || typeof row.targetBranchRegex !== "string") {
+              return res.status(422).json({ message: "workflowAutomations.gitlab.branchRules.targetBranchRegex required" });
+            }
+            try {
+              // eslint-disable-next-line no-new
+              new RegExp(row.targetBranchRegex);
+            } catch {
+              return res.status(422).json({ message: "workflowAutomations.gitlab.branchRules.targetBranchRegex invalid regex" });
+            }
+            if (row.rules != null) {
+              if (typeof row.rules !== "object") {
+                return res.status(422).json({ message: "workflowAutomations.gitlab.branchRules.rules must be object" });
+              }
+              for (const k of ["onDraftOpen", "onPrOpen", "onPrActivity", "onReadyForMerge", "onMerge"]) {
+                if (row.rules[k] != null && !allowedStatuses.has(String(row.rules[k]))) {
+                  return res.status(422).json({ message: `workflowAutomations.gitlab.branchRules.rules.${k} invalid` });
+                }
+              }
+            }
+          }
+        }
+      }
+      data.workflowAutomationsJson = w;
+    }
+  }
+
+  if (notificationSettings !== undefined) {
+    if (notificationSettings == null) {
+      data.notificationSettingsJson = null;
+    } else if (typeof notificationSettings !== "object") {
+      return res.status(422).json({ message: "notificationSettings must be object" });
+    } else {
+      const n = notificationSettings;
+      const dt = n.dingtalk;
+      if (dt != null && typeof dt !== "object") {
+        return res.status(422).json({ message: "notificationSettings.dingtalk must be object" });
+      }
+      if (dt) {
+        if (dt.botWebhookUrl !== undefined && dt.botWebhookUrl != null) {
+          const u = String(dt.botWebhookUrl || "").trim();
+          if (u && u.length > 1024) {
+            return res.status(422).json({ message: "notificationSettings.dingtalk.botWebhookUrl too long" });
+          }
+          if (u && !/^https?:\/\//i.test(u)) {
+            return res.status(422).json({ message: "notificationSettings.dingtalk.botWebhookUrl invalid" });
+          }
+        }
+        if (dt.botSecret !== undefined && dt.botSecret != null && String(dt.botSecret).length > 256) {
+          return res.status(422).json({ message: "notificationSettings.dingtalk.botSecret too long" });
+        }
+      }
+      data.notificationSettingsJson = n;
+    }
   }
 
   if (Object.keys(data).length === 0) {
@@ -284,4 +414,4 @@ teamsRouter.delete("/:teamId", async (req, res) => {
   return res.json({ id: team.id, deleted: true });
 });
 
-module.exports = { teamsRouter };
+module.exports = { teamsRouter, mapTeamRow };

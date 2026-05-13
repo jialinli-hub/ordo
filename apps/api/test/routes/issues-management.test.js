@@ -161,3 +161,36 @@ test("GET /api/issues/:id works when issue.workspaceId mismatches but team is in
   assert.equal(detail.statusCode, 200);
   assert.equal(detail.body.title, "Stale workspace id on issue");
 });
+
+test("GET /api/issues/:issuesId resolves when X-Workspace-Id is a different member workspace", async () => {
+  const headers = {
+    Authorization: "Bearer dev-dingtalk:crossws@example.com",
+    "x-organization-id": "org-cross-ws"
+  };
+
+  const mine = await request(app).get("/api/workspaces/mine").set(headers);
+  assert.equal(mine.statusCode, 200);
+  const wsA = mine.body.items[0].id;
+
+  const wsBRes = await request(app)
+    .post("/api/workspaces")
+    .set(headers)
+    .set("X-Workspace-Id", wsA)
+    .send({ name: "Beta WS Cross", url: "betacrossws" });
+  assert.equal(wsBRes.statusCode, 201);
+  const wsB = wsBRes.body.id;
+
+  const projRes = await request(app).post("/api/projects").set(headers).set("X-Workspace-Id", wsB).send({ name: "P", key: "PCROSS" });
+  assert.equal(projRes.statusCode, 201);
+
+  const issueRes = await request(app).post("/api/issues").set(headers).set("X-Workspace-Id", wsB).send({
+    projectId: projRes.body.id,
+    title: "In B"
+  });
+  assert.equal(issueRes.statusCode, 201);
+  const key = issueRes.body.issues_id;
+
+  const wrongCtx = await request(app).get(`/api/issues/${encodeURIComponent(key)}`).set(headers).set("X-Workspace-Id", wsA);
+  assert.equal(wrongCtx.statusCode, 200);
+  assert.equal(wrongCtx.body.workspaceId, wsB);
+});

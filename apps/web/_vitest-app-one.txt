@@ -1,0 +1,235 @@
+﻿
+ RUN  v4.1.5 F:/linear/ordo/apps/web
+
+ 鉂?src/App.test.jsx (15 tests | 1 failed | 14 skipped) 1038ms
+     脳 renders projects home page by default 1037ms
+node.exe : 
+所在位置 行:1 字符: 1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+鈳幆鈳幆鈳幆鈳?Failed Tests 1 鈳幆鈳幆鈳幆鈳?
+ FAIL  src/App.test.jsx > App shell pages > renders projects home page by default
+TestingLibraryElementError: Unable to find role="heading" and name "Projects"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<main[39m
+      [33mclass[39m=[32m"auth-layout auth-layout--splash"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33maria-hidden[39m=[32m""[39m
+        [33mclass[39m=[32m"auth-splash-bg"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"auth-splash-inner"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"閰嶈壊涓婚"[39m
+          [33mclass[39m=[32m"theme-switch"[39m
+          [33mrole[39m=[32m"group"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"theme-switch-label muted"[39m
+          [36m>[39m
+            [0m澶栬[0m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"theme-switch-track"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"娴呰壊"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"theme-switch-opt"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m娴呰壊[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"娣辫壊"[39m
+              [33maria-pressed[39m=[32m"true"[39m
+              [33mclass[39m=[32m"theme-switch-opt"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m娣辫壊[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"splash-brand"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"splash-logo-mark"[39m
+          [36m>[39m
+            [0mO[0m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"splash-brand-text"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"splash-logo-word"[39m
+            [36m>[39m
+              [0mOrdo[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"splash-tagline"[39m
+            [36m>[39m
+              [0m鍒涘缓浣犵殑绗竴涓伐浣滃尯[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"empty-state surface-card auth-card"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m浣犺繕娌℃湁 Workspace[0m
+          [36m</h2>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"muted"[39m
+          [36m>[39m
+            [0m璇疯緭鍏ヤ竴涓?Workspace 鍚嶇О寮€濮嬩娇鐢ㄣ€?[0m
+          [36m</p>[39m
+          [36m<form[39m
+            [33mclass[39m=[32m"create-workspace-form"[39m
+          [36m>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Workspace name"[39m
+              [33mclass[39m=[32m"inp-ordo"[39m
+              [33mplaceholder[39m=[32m"渚嬪锛歵rex"[39m
+              [33mtype[39m=[32m"text"[39m
+            [36m/>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn-ordo btn-ordo-create"[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m[0m
+              [0m鍒涘缓 Workspace[0m
+            [36m</button>[39m
+          [36m</form>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</main>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"auth-layout auth-layout--splash"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-hidden[39m=[32m""[39m
+          [33mclass[39m=[32m"auth-splash-bg"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"auth-splash-inner"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"閰嶈壊涓婚"[39m
+            [33mclass[39m=[32m"theme-switch"[39m
+            [33mrole[39m=[32m"group"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"theme-switch-label muted"[39m
+            [36m>[39m
+              [0m澶栬[0m
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  22:26:38
+   Duration  2.72s (transform 705ms, setup 95ms, import 756ms, tests 1.04s, environment 673ms)
+
+            [36m</span>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"theme-switch-track"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"娴呰壊"[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"theme-switch-opt"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m娴呰壊[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"娣辫壊"[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"theme-switch-opt"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m娣辫壊[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"splash-brand"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"splash-logo-mark"[39m
+            [36m>[39m
+              [0mO[0m
+            [36m</span>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"splash-brand-text"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"splash-logo-word"[39m
+              [36m>[39m
+                [0mOrdo[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"splash-tagline"[39m
+              [36m>[39m
+                [0m鍒涘缓浣犵殑绗竴涓伐浣滃尯[0m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<section[39m
+            [33mclass[39m=[32m"empty-state surface-card auth-card"[39m
+          [36m>[39m
+            [36m<h2>[39m
+              [0m浣犺繕娌℃湁 Workspace[0m
+            [36m</h2>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"muted"[39m
+            [36m>[39m
+              [0m璇疯緭鍏ヤ竴涓?Workspace 鍚嶇О寮€濮嬩娇鐢ㄣ€?[0m
+            [36m</p>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"create-workspace-form"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33maria-label[39m=[32m"Workspace name"[39m
+                [33mclass[39m=[32m"inp-ordo"[39m
+                [33mplaceholder[39m=[32m"渚嬪锛歵rex"[39m
+                [33mtype[39m=[32m"text"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"btn-ordo btn-ordo-create"[39m
+                [33mtype[39m=[32m"submit"[39m
+              [36m>[39m
+                [0m[0m
+                [0m鍒涘缓 Workspace[0m
+              [36m</button>[39m
+            [36m</form>[39m
+          [36m</section>[39m
+        [36m</div>[39m
+      [36m</main>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ 鉂?waitFor ../../node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ 鉂?src/App.test.jsx:143:11
+    141|     render(() => <App />);
+    142|
+    143|     await waitFor(() => {
+       |           ^
+    144|       expect(screen.getByRole("heading", { name: "Projects", level: 1 鈥?    145|       expect(screen.getByRole
+("button", { name: /^Workspace 鑿滃崟/ })).to鈥?
+鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆[1/1]鈳?

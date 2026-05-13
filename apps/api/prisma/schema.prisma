@@ -23,6 +23,10 @@ model User {
   /// 钉钉 unionId，用于稳定匹配同一钉钉用户（登录即静默注册/合并账号）
   dingTalkUnionId  String?  @unique
   dingTalkStaffId  String?
+  /// 钉钉开放平台「群机器人 @」使用的 userid（contact users/me 的 userId 等，非 unionId）
+  dingTalkUserId   String?
+  /// 钉钉侧手机号（登录时从 profile 同步），用于群机器人 @ 接收人
+  dingTalkMobile   String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -30,6 +34,8 @@ model User {
   workspacesCreated     Workspace[]       @relation("WorkspaceCreator")
   workspaceMemberships  WorkspaceMember[]
   preferences           UserPreference[]
+  projectsLed           Project[]         @relation("ProjectLead")
+  requirementsCreated   Requirement[]     @relation("RequirementCreator")
 }
 
 model Workspace {
@@ -48,13 +54,33 @@ model Workspace {
   members        WorkspaceMember[]
   teams          Team[]
   projects       Project[]
+  requirements   Requirement[]
   invites        WorkspaceInvite[]
   issueCounters  IssueNumberCounter[]
   cycles         Cycle[]
   userPreferences UserPreference[]
+  /** GitLab 工作区 Webhook 密钥等；推送记录见 gitlabWebhookDeliveries */
+  gitlabIntegrationJson   Json?
+  gitlabWebhookDeliveries GitlabWebhookDelivery[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, url])
+}
+
+/// 工作区维度：GitLab Webhook 投递记录（用于 Workspace 设置里可视化近期推送）
+model GitlabWebhookDelivery {
+  id                  String   @id @default(cuid())
+  workspaceId        String
+  gitlabEventHeader   String?
+  objectKind          String?
+  summary             String
+  matchedIssueKeys    String[] @default([])
+  detail              Json?
+  createdAt           DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }
 
 /// 按用户 + 工作区 + prefKey 存 UI 偏好（如 issue 列表视图）
@@ -98,8 +124,11 @@ model WorkspaceInvite {
   invitedBy   String
   createdAt   DateTime  @default(now())
   acceptedAt  DateTime?
+  /// 从团队设置生成邀请时记录来源团队，用于落地页展示与接受后定位侧栏
+  contextTeamId String?
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contextTeam Team?     @relation("WorkspaceInviteContextTeam", fields: [contextTeamId], references: [id], onDelete: SetNull)
 }
 
 model Team {
@@ -112,14 +141,49 @@ model Team {
   cooldownDays             Int? @default(2)
   /// 迭代统一开始于周几：0=周日 … 6=周六（与 JS Date.getDay 一致）
   iterationStartWeekday    Int? @default(1)
+  /// 是否在定时任务中按节奏自动创建「日常迭代」（kind=daily）；关闭后不再自动补齐
+  autoCreateDailyCycles    Boolean @default(true)
   issueLabelsJson          Json?
   issueStatusesJson        Json?
+  /** GitLab / PR 自动流转等 Workflow 配置（按 Team 维度） */
+  workflowAutomationsJson  Json?
+  /** 通知渠道配置（按 Team 维度），目前预置钉钉群机器人 */
+  notificationSettingsJson Json?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   issues    Issue[]
   cycles    Cycle[]
+  workspaceInviteContexts WorkspaceInvite[] @relation("WorkspaceInviteContextTeam")
 
   @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+/// 工作区需求池：PRD/相关文档链接，确认后可立项为项目与迭代
+model Requirement {
+  id                   String   @id @default(cuid())
+  organizationId       String
+  workspaceId          String
+  title                String
+  /// 历史字段：长文本 PRD（新录入以 prdUrl / otherFilesJson 为主）
+  prd                  String   @default("")
+  prdUrl               String?
+  /// JSON 数组：{ purpose: string, url: string }[]
+  otherFilesJson       Json?
+  /// draft | triaging | ready | converted
+  status               String   @default("draft")
+  createdById          String
+  convertedProjectId   String?
+  convertedCycleId     String?
+  convertedTeamId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator   User      @relation("RequirementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
 }
 
 model Project {
@@ -128,14 +192,19 @@ model Project {
   workspaceId    String
   name           String
   key            String
+  description    String?
+  leadUserId     String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      User?     @relation("ProjectLead", fields: [leadUserId], references: [id], onDelete: SetNull)
   issues    Issue[]
   cycles    Cycle[]
 
   @@unique([workspaceId, key])
+  @@index([organizationId, workspaceId])
+  @@index([leadUserId])
 }
 
 model Cycle {
@@ -145,31 +214,33 @@ model Cycle {
   teamId         String?
   projectId      String?
   name           String
+  /// 迭代类型：daily=日常迭代，project=项目迭代
+  kind           String    @default("daily")
   startsAt       DateTime
   endsAt         DateTime
   status         String
+  /** 预计提测（日期精度；前端 YYYY-MM-DD） */
+  plannedTestAt DateTime?
+  /** 预计发布（日期精度；前端 YYYY-MM-DD） */
+  releaseAt     DateTime?
+  /// 项目迭代：产品文档链接
+  productDocUrl String?
+  /// 项目迭代：设计文档链接
+  designDocUrl  String?
+  /// 项目迭代：UI 文档链接
+  uiDocUrl      String?
+  /// 发布条件：JSON 数组，项为 { text: string, status: "pending" | "done" }
+  releaseConditionsJson Json?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   team      Team?       @relation(fields: [teamId], references: [id], onDelete: SetNull)
   project   Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  epics     CycleEpic[]
-}
 
-/// 迭代下的大需求（Epic），任务可选归属某一 Epic
-model CycleEpic {
-  id        String   @id @default(uuid())
-  cycleId   String
-  name      String
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  cycle Cycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  issues Issue[]
-
-  @@index([cycleId])
+  @@index([workspaceId, startsAt])
+  @@index([workspaceId, teamId])
+  @@index([workspaceId, projectId])
 }
 
 model Issue {
@@ -181,7 +252,6 @@ model Issue {
   /// 父任务 id；仅支持一层子任务（子任务不可再带子任务）
   parentIssueId       String?
   cycleId             String?
-  cycleEpicId         String?
   title               String
   description         String?
   status              String    @default("todo")
@@ -201,17 +271,20 @@ model Issue {
 
   project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   team      Team?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  cycleEpic CycleEpic?     @relation(fields: [cycleEpicId], references: [id], onDelete: SetNull)
   parent    Issue?         @relation("IssueSubtasks", fields: [parentIssueId], references: [id], onDelete: Cascade)
   subtasks  Issue[]        @relation("IssueSubtasks")
   comments  IssueComment[]
   activities IssueActivity[]
+  attachments IssueAttachment[]
 
   @@unique([workspaceId, numberScope, issueNumber])
   @@index([parentIssueId])
   @@unique([workspaceId, issuesId])
   @@index([organizationId, status])
   @@index([workspaceId, teamId])
+  @@index([cycleId])
+  @@index([workspaceId, assigneeId])
+  @@index([workspaceId, updatedAt])
 }
 
 model IssueComment {
@@ -238,6 +311,23 @@ model IssueActivity {
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId, createdAt])
+}
+
+/// 任务级附件（二进制存库，单文件上限由 API 校验）
+model IssueAttachment {
+  id             String   @id @default(uuid())
+  organizationId String
+  issueId        String
+  fileName       String
+  contentType    String   @default("application/octet-stream")
+  size           Int
+  blob           Bytes
+  uploadedById   String
+  createdAt      DateTime @default(now())
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, issueId])
 }
 
 /// 与内存中 counterKey 一致：如 identifier:ENG 或 project:<projectId>

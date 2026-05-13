@@ -3,6 +3,62 @@ const { prisma } = require("../repositories/prisma");
 
 const workspaceInvitesRouter = express.Router();
 
+workspaceInvitesRouter.get("/preview", async (req, res) => {
+  const token = String(req.query?.token || "").trim();
+  const teamHint = String(req.query?.team || "").trim();
+
+  if (!token) {
+    return res.status(400).json({ message: "token is required" });
+  }
+
+  const invite = await prisma.workspaceInvite.findUnique({
+    where: { token },
+    include: {
+      workspace: {
+        select: { id: true, name: true, url: true }
+      }
+    }
+  });
+
+  if (!invite || invite.status === "revoked") {
+    return res.status(404).json({ message: "invite not found" });
+  }
+
+  if (invite.expiresAt.getTime() < Date.now()) {
+    await prisma.workspaceInvite.update({
+      where: { id: invite.id },
+      data: { status: "expired" }
+    });
+    return res.status(410).json({ message: "invite expired" });
+  }
+
+  /** @type {{ id: string, name: string } | null} */
+  let team = null;
+
+  if (invite.contextTeamId) {
+    const row = await prisma.team.findFirst({
+      where: { id: invite.contextTeamId, workspaceId: invite.workspaceId },
+      select: { id: true, name: true }
+    });
+    team = row;
+  } else if (teamHint) {
+    const row = await prisma.team.findFirst({
+      where: { id: teamHint, workspaceId: invite.workspaceId },
+      select: { id: true, name: true }
+    });
+    if (row) {
+      team = row;
+    }
+  }
+
+  return res.status(200).json({
+    workspace: invite.workspace,
+    role: invite.role,
+    expiresAt: invite.expiresAt.toISOString(),
+    team
+  });
+});
+
 workspaceInvitesRouter.get("/accept", async (req, res) => {
   const token = req.query?.token;
   if (!token) {
@@ -58,7 +114,8 @@ workspaceInvitesRouter.get("/accept", async (req, res) => {
 
   return res.status(200).json({
     workspaceId: invite.workspaceId,
-    status: "accepted"
+    status: "accepted",
+    contextTeamId: invite.contextTeamId
   });
 });
 

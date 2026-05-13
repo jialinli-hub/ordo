@@ -23,6 +23,7 @@ async function parseDingTalkAccessToken(accessToken) {
   }
 
   const data = await response.json();
+  console.log("[dingtalk] contact/users/me 响应体", data);
   const union =
     data?.unionId != null && data.unionId !== ""
       ? String(data.unionId)
@@ -39,12 +40,23 @@ async function parseDingTalkAccessToken(accessToken) {
     primary ||
     `${data.staffId ?? data.staff_id ?? (union || data.mobile || "dingtalk-user")}@dingtalk.local`;
 
+  const mobileRaw = data.mobile ?? data.mobilePhone ?? data.telephone ?? data.phone ?? "";
+  const dingTalkMobile =
+    mobileRaw != null && String(mobileRaw).trim() !== "" ? String(mobileRaw).trim() : undefined;
+
+  /** 群机器人 text.at.atUserIds 须使用企业内部 userid；见开放平台「自定义机器人发送群消息」 */
+  const rawUid = data.userId ?? data.userid ?? data.user_id;
+  const dingTalkUserId =
+    rawUid != null && String(rawUid).trim() !== "" ? String(rawUid).trim() : undefined;
+
   return {
     email,
     name: data.nick || data.name || email.split("@")[0],
     picture: data.avatarUrl || null,
     dingTalkUnionId: union || null,
-    dingTalkStaffId: data.staffId != null ? String(data.staffId) : data.staff_id != null ? String(data.staff_id) : null
+    dingTalkStaffId: data.staffId != null ? String(data.staffId) : data.staff_id != null ? String(data.staff_id) : null,
+    dingTalkUserId,
+    dingTalkMobile
   };
 }
 

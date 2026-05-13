@@ -10,6 +10,7 @@
     "build": "echo \"api build skipped (plain node)\"",
     "test": "node --require ./test/load-env.js --test",
     "lint": "node --check src/app.js && node --check src/server.js",
+    "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -19,13 +20,22 @@
     "seed": "node prisma/seed.js"
   },
   "dependencies": {
+    "@graphql-tools/schema": "^10.0.33",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@prisma/client": "^6.6.0",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
-    "express-async-errors": "^3.1.1"
+    "express-async-errors": "^3.1.1",
+    "graphql": "^16.14.0",
+    "graphql-http": "^1.22.4",
+    "graphql-type-json": "^0.3.2",
+    "jsonwebtoken": "^9.0.3",
+    "lru-cache": "^10.4.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "prisma": "^6.6.0",
     "supertest": "^7.1.1"
   },

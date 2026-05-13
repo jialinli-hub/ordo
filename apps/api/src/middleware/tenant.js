@@ -111,11 +111,25 @@ async function ensureDefaultWorkspace(tx, identity, organizationIdFromHeader, us
 
 
 
-async function tenantMiddleware(req, _res, next) {
+async function tenantMiddleware(req, res, next) {
 
   try {
 
     req.context = req.context || {};
+
+    if (req.auth?.mcpOAuth) {
+      const { userId, workspaceId, organizationId } = req.auth.mcpOAuth;
+      const mem = await prisma.workspaceMember.findFirst({
+        where: { workspaceId, userId }
+      });
+      if (!mem) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      req.context.userId = userId;
+      req.context.workspaceId = workspaceId;
+      req.context.organizationId = organizationId;
+      return next();
+    }
 
     const identity = req.auth?.identity;
 

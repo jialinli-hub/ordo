@@ -1,14 +1,16 @@
 import { For, Index, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { apiGet, apiPatch, apiPost } from "../../api/client";
 import { WEEKDAY_OPTIONS_JS, previewTeamIterations } from "../../lib/teamCyclePreview";
-import { Btn, Inp, Sel } from "../../ui/primitives.jsx";
+import { Btn, Inp, Sel, ToggleSwitch } from "../../ui/primitives.jsx";
 
 const TABS = [
   { id: "general", label: "General" },
   { id: "members", label: "Members" },
   { id: "labels", label: "Issue labels" },
   { id: "statuses", label: "Issue statuses" },
-  { id: "cycles", label: "Cycle" }
+  { id: "cycles", label: "Cycle" },
+  { id: "workflow", label: "Workflow" },
+  { id: "notifications", label: "Notifications" }
 ];
 
 function emptyLabel() {
@@ -17,6 +19,13 @@ function emptyLabel() {
 
 function emptyStatus() {
   return { key: "", label: "" };
+}
+
+function emptyBranchRule() {
+  return {
+    targetBranchRegex: "^devreview_.*",
+    rules: {}
+  };
 }
 
 export function TeamSettings(props) {
@@ -34,6 +43,7 @@ export function TeamSettings(props) {
   const [iterationDays, setIterationDays] = createSignal("14");
   const [cooldownDays, setCooldownDays] = createSignal("2");
   const [startWeekday, setStartWeekday] = createSignal("1");
+  const [autoCreateDailyCycles, setAutoCreateDailyCycles] = createSignal(true);
   const [inviteBusy, setInviteBusy] = createSignal(false);
   const [inviteLink, setInviteLink] = createSignal("");
   const [inviteExpires, setInviteExpires] = createSignal("");
@@ -42,6 +52,27 @@ export function TeamSettings(props) {
   const [labels, setLabels] = createSignal([emptyLabel()]);
   const [statuses, setStatuses] = createSignal([emptyStatus()]);
   const [members, setMembers] = createSignal([]);
+  const [workflow, setWorkflow] = createSignal({
+    gitlab: {
+      enabled: false,
+      secret: "",
+      rules: {
+        onDraftOpen: "in_progress",
+        onPrOpen: "in_progress",
+        onPrActivity: "in_progress",
+        onReadyForMerge: "in_review",
+        onMerge: "done"
+      },
+      branchRules: []
+    }
+  });
+  const [notifications, setNotifications] = createSignal({
+    dingtalk: {
+      enabled: false,
+      botWebhookUrl: "",
+      botSecret: ""
+    }
+  });
 
   async function hydrate() {
     const tid = team()?.id;
@@ -66,10 +97,17 @@ export function TeamSettings(props) {
       setIterationDays(String(full.iterationDurationDays ?? 14));
       setCooldownDays(String(full.cooldownDays ?? 2));
       setStartWeekday(String(full.iterationStartWeekday ?? 1));
+      setAutoCreateDailyCycles(full.autoCreateDailyCycles !== false);
       const lbs = Array.isArray(full.issueLabels) && full.issueLabels.length ? full.issueLabels : [{ name: "", color: "#94a3b8" }];
       setLabels(lbs);
       const sts = Array.isArray(full.issueStatuses) && full.issueStatuses.length ? full.issueStatuses : [{ key: "", label: "" }];
       setStatuses(sts);
+      if (full.workflowAutomations && typeof full.workflowAutomations === "object") {
+        setWorkflow(full.workflowAutomations);
+      }
+      if (full.notificationSettings && typeof full.notificationSettings === "object") {
+        setNotifications(full.notificationSettings);
+      }
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : "加载团队设置失败");
     } finally {
@@ -181,10 +219,31 @@ export function TeamSettings(props) {
       {
         iterationDurationDays: it,
         cooldownDays: cd,
-        iterationStartWeekday: Number.isFinite(dow) ? Math.min(6, Math.max(0, Math.round(dow))) : 1
+        iterationStartWeekday: Number.isFinite(dow) ? Math.min(6, Math.max(0, Math.round(dow))) : 1,
+        autoCreateDailyCycles: Boolean(autoCreateDailyCycles())
       },
       "Cycle 设置已保存"
     );
+  }
+
+  async function saveWorkflow(ev) {
+    ev?.preventDefault?.();
+    await persist({ workflowAutomations: workflow() }, "Workflow 已保存");
+  }
+
+  async function saveNotifications(ev) {
+    ev?.preventDefault?.();
+    const dt = notifications()?.dingtalk || {};
+    const cleaned = {
+      ...notifications(),
+      dingtalk: {
+        enabled: Boolean(dt.enabled),
+        botWebhookUrl: String(dt.botWebhookUrl || "").trim(),
+        botSecret: String(dt.botSecret || "").trim()
+      }
+    };
+    setNotifications(cleaned);
+    await persist({ notificationSettings: cleaned }, "Notifications 已保存");
   }
 
   const cyclePreviewRows = createMemo(() =>
@@ -210,12 +269,12 @@ export function TeamSettings(props) {
     setInviteErr("");
     setCopyHint("");
     try {
-      const data = await apiPost(`/api/workspaces/${encodeURIComponent(wid)}/invites`, { role: "member" });
-      const base = data.inviteLink || "";
       const tid = team()?.id;
-      const sep = base.includes("?") ? "&" : "?";
-      const link = base && tid ? `${base}${sep}team=${encodeURIComponent(tid)}` : base;
-      setInviteLink(link);
+      const data = await apiPost(`/api/workspaces/${encodeURIComponent(wid)}/invites`, {
+        role: "member",
+        ...(tid ? { contextTeamId: tid } : {})
+      });
+      setInviteLink(typeof data.inviteLink === "string" ? data.inviteLink : "");
       setInviteExpires(typeof data.expiresAt === "string" ? data.expiresAt : "");
     } catch (e) {
       setInviteErr(e instanceof Error && e.message ? e.message : "生成邀请链接失败");
@@ -254,8 +313,71 @@ export function TeamSettings(props) {
     });
   }
 
+  function updateWorkflowGitlab(patch) {
+    setWorkflow((prev) => ({ ...prev, gitlab: { ...(prev?.gitlab || {}), ...patch } }));
+  }
+
+  function updateWorkflowRules(patch) {
+    setWorkflow((prev) => ({
+      ...prev,
+      gitlab: { ...(prev?.gitlab || {}), rules: { ...((prev?.gitlab || {}).rules || {}), ...patch } }
+    }));
+  }
+
+  function updateBranchRule(index, patch) {
+    setWorkflow((prev) => {
+      const gl = prev?.gitlab || {};
+      const list = Array.isArray(gl.branchRules) ? gl.branchRules : [];
+      const next = [...list];
+      next[index] = { ...next[index], ...patch };
+      return { ...prev, gitlab: { ...gl, branchRules: next } };
+    });
+  }
+
+  function updateBranchRuleRules(index, patch) {
+    setWorkflow((prev) => {
+      const gl = prev?.gitlab || {};
+      const list = Array.isArray(gl.branchRules) ? gl.branchRules : [];
+      const next = [...list];
+      const cur = next[index] || emptyBranchRule();
+      next[index] = { ...cur, rules: { ...(cur.rules || {}), ...patch } };
+      return { ...prev, gitlab: { ...gl, branchRules: next } };
+    });
+  }
+
+  function webhookUrl() {
+    const tid = team()?.id || "";
+    if (!tid) return "";
+    const base = window.location.origin;
+    return `${base}/api/integrations/gitlab/webhook/${encodeURIComponent(tid)}`;
+  }
+
+  function updateDingTalk(patch) {
+    setNotifications((prev) => ({ ...prev, dingtalk: { ...(prev?.dingtalk || {}), ...patch } }));
+  }
+
+  const WORKFLOW_STATUS_ORDER = ["todo", "in_progress", "in_review", "done"];
+  const workflowStatusOptions = createMemo(() => {
+    const byKey = Object.fromEntries(
+      (statuses() || [])
+        .map((s) => ({
+          key: String(s?.key || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "_"),
+          label: String(s?.label || "").trim()
+        }))
+        .filter((x) => x.key && x.label)
+        .map((x) => [x.key, x.label])
+    );
+    return WORKFLOW_STATUS_ORDER.map((k) => ({
+      value: k,
+      label: byKey[k] || (k === "todo" ? "Todo" : k === "in_progress" ? "进行中" : k === "in_review" ? "评审中" : "已完成")
+    }));
+  });
+
   return (
-    <section class="content settings page-wrap team-settings-page surface-card flat-top">
+    <section class="content settings page-wrap team-settings-page surface-card">
       <p class="crumb muted">Teams / {team()?.name ?? ""}</p>
       <h1>{team()?.name ?? "Team settings"}</h1>
       <p class="sub-title muted">管理团队偏好、标签、状态与迭代节奏</p>
@@ -284,7 +406,7 @@ export function TeamSettings(props) {
           <form class="tst-panel" onSubmit={saveGeneral}>
             <div class="tst-panel-head">
               <h2 class="tst-panel-title">General</h2>
-              <Btn variant="primary" htmlType="submit" loading={saving()}>
+              <Btn variant="save" htmlType="submit" loading={saving()}>
                 保存
               </Btn>
             </div>
@@ -323,7 +445,7 @@ export function TeamSettings(props) {
                 生成后<strong> 7 天</strong>内有效；同一链接有效期内可分享给多人重复使用。仅限 Workspace 管理员/所有者操作；加入后为 member。
               </p>
               <div class="tst-invite-actions">
-                <Btn variant="primary" type="button" loading={inviteBusy()} disabled={inviteBusy()} onClick={() => createWorkspaceInviteLink()}>
+                <Btn variant="create" type="button" loading={inviteBusy()} disabled={inviteBusy()} onClick={() => createWorkspaceInviteLink()}>
                   {inviteBusy() ? "生成中…" : "生成邀请链接"}
                 </Btn>
                 <Btn variant="default" type="button" disabled={!inviteLink()} onClick={() => copyInviteLink()}>
@@ -373,10 +495,10 @@ export function TeamSettings(props) {
             <div class="tst-panel-head">
               <h2 class="tst-panel-title">Issue labels</h2>
               <div style={{ display: "flex", gap: "8px" }}>
-                <Btn variant="default" type="button" onClick={() => setLabels([...labels(), emptyLabel()])}>
+                <Btn variant="create" type="button" onClick={() => setLabels([...labels(), emptyLabel()])}>
                   新增
                 </Btn>
-                <Btn variant="primary" htmlType="submit" loading={saving()}>
+                <Btn variant="save" htmlType="submit" loading={saving()}>
                   保存
                 </Btn>
               </div>
@@ -414,10 +536,10 @@ export function TeamSettings(props) {
             <div class="tst-panel-head">
               <h2 class="tst-panel-title">Issue statuses</h2>
               <div style={{ display: "flex", gap: "8px" }}>
-                <Btn variant="default" type="button" onClick={() => setStatuses([...statuses(), emptyStatus()])}>
+                <Btn variant="create" type="button" onClick={() => setStatuses([...statuses(), emptyStatus()])}>
                   新增
                 </Btn>
-                <Btn variant="primary" htmlType="submit" loading={saving()}>
+                <Btn variant="save" htmlType="submit" loading={saving()}>
                   保存
                 </Btn>
               </div>
@@ -454,12 +576,23 @@ export function TeamSettings(props) {
           <form class="tst-panel" onSubmit={saveCycleSettings}>
             <div class="tst-panel-head">
               <h2 class="tst-panel-title">Cycle</h2>
-              <Btn variant="primary" htmlType="submit" loading={saving()}>
+              <Btn variant="save" htmlType="submit" loading={saving()}>
                 保存
               </Btn>
             </div>
             <p class="muted tst-hint">
               用于规划迭代节奏；新建 Cycle 时仍可手动指定日期。以下为根据当前配置推算的<strong>最近 3 次</strong>迭代起止日（自然日，本地时区）。
+            </p>
+            <div class="tst-field" style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+              <ToggleSwitch
+                checked={autoCreateDailyCycles()}
+                onChange={(v) => setAutoCreateDailyCycles(Boolean(v))}
+                aria-label="自动创建日常迭代"
+              />
+              <span>自动创建日常迭代</span>
+            </div>
+            <p class="muted tst-hint" style={{ "margin-top": "-4px" }}>
+              开启后，服务端每日定时任务会按下方节奏为团队<strong>至少提前准备 1 个</strong>未开始的<strong>日常迭代</strong>（与手动创建的项目迭代无关）；关闭后不再自动补齐。
             </p>
             <label class="modal-field tst-field">
               <span>迭代从周几开始</span>
@@ -511,6 +644,226 @@ export function TeamSettings(props) {
                 </For>
               </ul>
             </div>
+          </form>
+        </Show>
+
+        <Show when={tab() === "workflow"}>
+          <form class="tst-panel" onSubmit={saveWorkflow}>
+            <div class="tst-panel-head">
+              <h2 class="tst-panel-title">Workflow</h2>
+              <Btn variant="save" htmlType="submit" loading={saving()}>
+                保存
+              </Btn>
+            </div>
+            <p class="muted tst-hint">
+              与 Linear 类似：Webhook 把 GitLab 活动写入任务后，在<strong>任务详情 → 开发与合并</strong>中展示 MR/分支/提交链接。此处 Workflow
+              为<strong>可选</strong>：在识别到任务编号（来自分支名、MR 标题/描述、commit message 等）时，按下方规则<strong>自动更新任务状态</strong>。
+            </p>
+
+            <div class="tst-field" style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+              <ToggleSwitch
+                checked={Boolean(workflow()?.gitlab?.enabled)}
+                onChange={(v) => updateWorkflowGitlab({ enabled: Boolean(v) })}
+              />
+              <span>启用 GitLab 状态自动化（可选）</span>
+            </div>
+
+            <label class="modal-field tst-field">
+              <span>Webhook URL</span>
+              <Inp value={webhookUrl()} disabled aria-label="Webhook URL" />
+            </label>
+            <label class="modal-field tst-field">
+              <span>Secret Token（GitLab: X-Gitlab-Token）</span>
+              <Inp
+                value={workflow()?.gitlab?.secret || ""}
+                onInput={(e) => updateWorkflowGitlab({ secret: e.target.value })}
+                placeholder="建议使用随机字符串"
+                aria-label="GitLab Secret Token"
+              />
+            </label>
+
+            <div class="tst-field">
+              <h3 style={{ margin: "10px 0 6px", "font-size": "12px" }}>默认规则</h3>
+              <div class="tst-rows" style={{ "grid-template-columns": "1fr 1fr" }}>
+                <label class="modal-field">
+                  <span>Draft MR 打开/更新</span>
+                  <Sel
+                    class="fullw"
+                    aria-label="onDraftOpen"
+                    value={workflow()?.gitlab?.rules?.onDraftOpen || "in_progress"}
+                    options={workflowStatusOptions()}
+                    onChange={(v) => updateWorkflowRules({ onDraftOpen: v })}
+                  />
+                </label>
+                <label class="modal-field">
+                  <span>MR 打开</span>
+                  <Sel
+                    class="fullw"
+                    aria-label="onPrOpen"
+                    value={workflow()?.gitlab?.rules?.onPrOpen || "in_progress"}
+                    options={workflowStatusOptions()}
+                    onChange={(v) => updateWorkflowRules({ onPrOpen: v })}
+                  />
+                </label>
+                <label class="modal-field">
+                  <span>MR 活动（更新/评论/Push）</span>
+                  <Sel
+                    class="fullw"
+                    aria-label="onPrActivity"
+                    value={workflow()?.gitlab?.rules?.onPrActivity || "in_progress"}
+                    options={workflowStatusOptions()}
+                    onChange={(v) => updateWorkflowRules({ onPrActivity: v })}
+                  />
+                </label>
+                <label class="modal-field">
+                  <span>Ready for merge（approved）</span>
+                  <Sel
+                    class="fullw"
+                    aria-label="onReadyForMerge"
+                    value={workflow()?.gitlab?.rules?.onReadyForMerge || "in_review"}
+                    options={workflowStatusOptions()}
+                    onChange={(v) => updateWorkflowRules({ onReadyForMerge: v })}
+                  />
+                </label>
+                <label class="modal-field">
+                  <span>Merge</span>
+                  <Sel
+                    class="fullw"
+                    aria-label="onMerge"
+                    value={workflow()?.gitlab?.rules?.onMerge || "done"}
+                    options={workflowStatusOptions()}
+                    onChange={(v) => updateWorkflowRules({ onMerge: v })}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="tst-field">
+              <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", gap: "10px", margin: "10px 0 6px" }}>
+                <h3 style={{ margin: 0, "font-size": "12px" }}>分支规则（按目标分支覆盖）</h3>
+                <Btn
+                  variant="create"
+                  type="button"
+                  onClick={() => updateWorkflowGitlab({ branchRules: [...(workflow()?.gitlab?.branchRules || []), emptyBranchRule()] })}
+                >
+                  新增分支规则
+                </Btn>
+              </div>
+
+              <Index each={workflow()?.gitlab?.branchRules || []}>
+                {(row, index) => (
+                  <div class="tst-invite-panel surface-card" style={{ margin: "8px 0", padding: "12px" }}>
+                    <div style={{ display: "flex", gap: "8px", "align-items": "center" }}>
+                      <Inp
+                        class="fullw"
+                        placeholder="目标分支 Regex（例如 ^devreview_.* ）"
+                        value={row().targetBranchRegex || ""}
+                        onInput={(e) => updateBranchRule(index, { targetBranchRegex: e.target.value })}
+                        aria-label="targetBranchRegex"
+                      />
+                      <Btn
+                        variant="text"
+                        type="button"
+                        class="btn-ordo-danger-text"
+                        onClick={() =>
+                          updateWorkflowGitlab({
+                            branchRules: (workflow()?.gitlab?.branchRules || []).filter((_, i) => i !== index)
+                          })
+                        }
+                      >
+                        移除
+                      </Btn>
+                    </div>
+
+                    <div class="tst-rows" style={{ "grid-template-columns": "1fr 1fr", margin: "10px 0 0" }}>
+                      <label class="modal-field">
+                        <span>Draft</span>
+                        <Sel
+                          class="fullw"
+                          value={row().rules?.onDraftOpen || ""}
+                          options={[{ value: "", label: "跟随默认" }, ...workflowStatusOptions()]}
+                          onChange={(v) => updateBranchRuleRules(index, { onDraftOpen: v || null })}
+                        />
+                      </label>
+                      <label class="modal-field">
+                        <span>Open</span>
+                        <Sel
+                          class="fullw"
+                          value={row().rules?.onPrOpen || ""}
+                          options={[{ value: "", label: "跟随默认" }, ...workflowStatusOptions()]}
+                          onChange={(v) => updateBranchRuleRules(index, { onPrOpen: v || null })}
+                        />
+                      </label>
+                      <label class="modal-field">
+                        <span>Activity</span>
+                        <Sel
+                          class="fullw"
+                          value={row().rules?.onPrActivity || ""}
+                          options={[{ value: "", label: "跟随默认" }, ...workflowStatusOptions()]}
+                          onChange={(v) => updateBranchRuleRules(index, { onPrActivity: v || null })}
+                        />
+                      </label>
+                      <label class="modal-field">
+                        <span>Ready</span>
+                        <Sel
+                          class="fullw"
+                          value={row().rules?.onReadyForMerge || ""}
+                          options={[{ value: "", label: "跟随默认" }, ...workflowStatusOptions()]}
+                          onChange={(v) => updateBranchRuleRules(index, { onReadyForMerge: v || null })}
+                        />
+                      </label>
+                      <label class="modal-field">
+                        <span>Merge</span>
+                        <Sel
+                          class="fullw"
+                          value={row().rules?.onMerge || ""}
+                          options={[{ value: "", label: "跟随默认" }, ...workflowStatusOptions()]}
+                          onChange={(v) => updateBranchRuleRules(index, { onMerge: v || null })}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </Index>
+            </div>
+          </form>
+        </Show>
+
+        <Show when={tab() === "notifications"}>
+          <form class="tst-panel" onSubmit={saveNotifications}>
+            <div class="tst-panel-head">
+              <h2 class="tst-panel-title">Notifications</h2>
+              <Btn variant="save" htmlType="submit" loading={saving()}>
+                保存
+              </Btn>
+            </div>
+            <p class="muted tst-hint">
+              目前预置<strong>钉钉群自定义机器人</strong>。你只需要配置机器人 Webhook URL（可选加签 Secret），消息模板内置在代码中。
+            </p>
+
+            <div class="tst-field" style={{ display: "flex", "align-items": "center", gap: "10px" }}>
+              <ToggleSwitch checked={Boolean(notifications()?.dingtalk?.enabled)} onChange={(v) => updateDingTalk({ enabled: Boolean(v) })} />
+              <span>启用钉钉通知</span>
+            </div>
+
+            <label class="modal-field tst-field">
+              <span>机器人 Webhook URL</span>
+              <Inp
+                value={notifications()?.dingtalk?.botWebhookUrl || ""}
+                onInput={(e) => updateDingTalk({ botWebhookUrl: e.target.value })}
+                placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+                aria-label="钉钉机器人 Webhook URL"
+              />
+            </label>
+            <label class="modal-field tst-field">
+              <span>加签 Secret（可选）</span>
+              <Inp
+                value={notifications()?.dingtalk?.botSecret || ""}
+                onInput={(e) => updateDingTalk({ botSecret: e.target.value })}
+                placeholder="开启“加签”时填写"
+                aria-label="钉钉机器人 Secret"
+              />
+            </label>
           </form>
         </Show>
       </Show>

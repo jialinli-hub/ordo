@@ -2,11 +2,15 @@ import "./App.css";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 const LS_TOKEN_KEY = "ordo_access_token";
+/** 上次选中的 Workspace id，仅存浏览器 localStorage，登出也保留以便下次登录恢复 */
 const LS_WORKSPACE_KEY = "ordo_current_workspace_id";
 /** 每个浏览器标签页内最多做一次「用 token 拉通后端 User」的补救，避免每次刷新都打注册接口 */
 const SESSION_BOOTSTRAP_KEY = "ordo_session_bootstrapped";
 /** 钉钉 OAuth 会回到 / ，邀请 token 仅存于初次 URL —— 先入 session 再登录，登录后兑付 */
 const SESSION_PENDING_WORKSPACE_INVITE_KEY = "ordo_pending_workspace_invite_token";
+const SESSION_PENDING_WORKSPACE_INVITE_TEAM_KEY = "ordo_pending_workspace_invite_team";
+/** UI 主题：light | dark，与 HTML data-theme 同步 */
+const LS_THEME_KEY = "ordo_theme";
 
 function acceptWorkspaceInvitePath() {
   return "/accept-workspace-invite";
@@ -24,15 +28,34 @@ function getWorkspaceInviteTokenFromLocation() {
   }
 }
 
-function stashWorkspaceInviteTokenFromUrlIfPresent() {
-  const raw = getWorkspaceInviteTokenFromLocation();
-  if (!raw) {
-    return;
-  }
+function getWorkspaceInviteTeamFromLocation() {
   try {
-    sessionStorage.setItem(SESSION_PENDING_WORKSPACE_INVITE_KEY, raw);
+    const url = new URL(window.location.href);
+    if (url.pathname !== acceptWorkspaceInvitePath()) {
+      return "";
+    }
+    return url.searchParams.get("team")?.trim() || "";
   } catch {
-    /* ignore quota / privacy */
+    return "";
+  }
+}
+
+function stashWorkspaceInviteFromUrlIfPresent() {
+  const raw = getWorkspaceInviteTokenFromLocation();
+  if (raw) {
+    try {
+      sessionStorage.setItem(SESSION_PENDING_WORKSPACE_INVITE_KEY, raw);
+    } catch {
+      /* ignore quota / privacy */
+    }
+  }
+  const team = getWorkspaceInviteTeamFromLocation();
+  if (team) {
+    try {
+      sessionStorage.setItem(SESSION_PENDING_WORKSPACE_INVITE_TEAM_KEY, team);
+    } catch {
+      /* ignore quota / privacy */
+    }
   }
 }
 
@@ -48,9 +71,29 @@ function readPendingWorkspaceInviteToken() {
   return getWorkspaceInviteTokenFromLocation();
 }
 
+function readPendingInviteTeamHint() {
+  try {
+    const fromSession = sessionStorage.getItem(SESSION_PENDING_WORKSPACE_INVITE_TEAM_KEY);
+    if (fromSession && String(fromSession).trim()) {
+      return String(fromSession).trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  return getWorkspaceInviteTeamFromLocation();
+}
+
 function clearPendingWorkspaceInviteToken() {
   try {
     sessionStorage.removeItem(SESSION_PENDING_WORKSPACE_INVITE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPendingInviteTeamHint() {
+  try {
+    sessionStorage.removeItem(SESSION_PENDING_WORKSPACE_INVITE_TEAM_KEY);
   } catch {
     /* ignore */
   }
@@ -67,7 +110,7 @@ function pruneOrdoLocalStorage() {
       }
     }
     for (const key of keys) {
-      if (key === LS_TOKEN_KEY || key === LS_WORKSPACE_KEY) {
+      if (key === LS_TOKEN_KEY || key === LS_WORKSPACE_KEY || key === LS_THEME_KEY) {
         continue;
       }
       if (key.startsWith("ordo")) {
@@ -78,15 +121,79 @@ function pruneOrdoLocalStorage() {
     /* ignore quota / privacy mode */
   }
 }
-import { Btn, Inp, Modal, Sel } from "./ui/primitives.jsx";
+import { Btn, Inp, Modal } from "./ui/primitives.jsx";
 import { apiGet, apiPatch, apiPost } from "./api/client";
+
+function ordoApiOriginForDisplay() {
+  const b = import.meta.env.VITE_API_BASE_URL;
+  if (typeof b === "string" && b.trim()) {
+    return b.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "";
+}
 import { teamMenuColor } from "./lib/teamMenuColor";
+import { parseWorkspaceRelativeIssuePath, parseWorkspaceRelativeProjectPath } from "./lib/appPaths.js";
 import { findTeamFromUrlSegment, teamSegmentForUrl } from "./lib/teamSlug";
 import { DingTalkLogin } from "./features/auth/DingTalkLogin.jsx";
+import { WorkspaceInviteLanding } from "./features/auth/WorkspaceInviteLanding.jsx";
 import { ProjectList } from "./features/projects/ProjectList.jsx";
+import { ProjectsAside } from "./features/projects/ProjectsAside.jsx";
 import { IssueList } from "./features/issues/IssueList.jsx";
 import { CycleList } from "./features/cycles/CycleList.jsx";
 import { TeamSettings } from "./features/teams/TeamSettings.jsx";
+import { ShellTopBar } from "./features/shell/ShellTopBar.jsx";
+import { RequirementPoolPage } from "./features/requirements/RequirementPoolPage.jsx";
+
+function readTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+function applyTheme(mode) {
+  const m = mode === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", m);
+  try {
+    localStorage.setItem(LS_THEME_KEY, m);
+  } catch {
+    /* ignore quota / privacy */
+  }
+}
+
+function ThemeSwitch() {
+  const [theme, setTheme] = createSignal(readTheme());
+  return (
+    <div class="theme-switch" role="group" aria-label="配色主题">
+      <div class="theme-switch-track">
+        <button
+          type="button"
+          class="theme-switch-opt"
+          aria-pressed={theme() === "light"}
+          aria-label="浅色"
+          onClick={() => {
+            applyTheme("light");
+            setTheme("light");
+          }}
+        >
+          浅色
+        </button>
+        <button
+          type="button"
+          class="theme-switch-opt"
+          aria-pressed={theme() === "dark"}
+          aria-label="深色"
+          onClick={() => {
+            applyTheme("dark");
+            setTheme("dark");
+          }}
+        >
+          深色
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function navigateTo(path) {
   if (window.location.pathname === path) {
@@ -190,6 +297,88 @@ function parseTeamRoute(innerPathStr) {
   return null;
 }
 
+/** `/issues/:key` 或 `/{workspaceUrl}/issues/:key`：先拉任务再解析团队 */
+function IssueShortcutRoute(props) {
+  const [issueRow, setIssueRow] = createSignal(null);
+  const [loadError, setLoadError] = createSignal("");
+
+  createEffect(() => {
+    const key = props.issueKey;
+    let alive = true;
+    setIssueRow(null);
+    setLoadError("");
+    apiGet(`/api/issues/${encodeURIComponent(key)}`)
+      .then((row) => {
+        if (!alive) {
+          return;
+        }
+        setIssueRow(row);
+      })
+      .catch((err) => {
+        if (!alive) {
+          return;
+        }
+        setLoadError(err?.message || "加载任务失败");
+      });
+    return () => {
+      alive = false;
+    };
+  });
+
+  createEffect(() => {
+    const row = issueRow();
+    if (row?.workspaceId) {
+      props.onIssueWorkspaceResolved?.(row.workspaceId);
+    }
+    const tid = row?.teamId ?? null;
+    if (tid) {
+      props.onIssueTeamResolved?.(tid);
+    }
+  });
+
+  const derivedTeam = createMemo(() => {
+    const row = issueRow();
+    if (!row) {
+      return { teamId: "", teamName: "" };
+    }
+    const tid = row.teamId || "";
+    const hit = tid ? props.teams.find((t) => t.id === tid) : null;
+    return { teamId: tid, teamName: hit?.name || "" };
+  });
+
+  return (
+    <>
+      <Show when={loadError()}>
+        <div class="main-area">
+          <section class="content page-wrap">
+            <p class="error-text">{loadError()}</p>
+          </section>
+        </div>
+      </Show>
+      <Show when={!loadError() && !issueRow()}>
+        <div class="main-area">
+          <section class="content page-wrap issue-detail-route">
+            <p class="muted">加载任务…</p>
+          </section>
+        </div>
+      </Show>
+      <Show when={issueRow()}>
+        <div class="main-area">
+          <section class="content page-wrap issue-detail-route">
+            <IssueList
+              teamId={derivedTeam().teamId}
+              teamName={derivedTeam().teamName}
+              workspaceId={props.workspaceId}
+              issueId={props.issueKey}
+              workspacePathPrefix={props.workspacePathPrefix}
+            />
+          </section>
+        </div>
+      </Show>
+    </>
+  );
+}
+
 function SvgIconProjects() {
   return (
     <svg class="nav-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true">
@@ -204,6 +393,15 @@ function SvgIconIssues() {
     <svg class="nav-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true">
       <rect x="4" y="4" width="16" height="16" rx="2.25" />
       <path d="M8 9h8M8 13h8M8 17h5" />
+    </svg>
+  );
+}
+
+function SvgIconPool() {
+  return (
+    <svg class="nav-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true">
+      <path d="M4 10h16l-1.5 8H5.5L4 10z" />
+      <path d="M8 10V7a4 4 0 018 0v3" />
     </svg>
   );
 }
@@ -228,6 +426,7 @@ function SvgIconChevronDown() {
 }
 
 function NavLink(p) {
+  const badge = () => p.badge;
   return (
     <a
       class={[
@@ -250,6 +449,11 @@ function NavLink(p) {
         </span>
       ) : null}
       <span class="nav-link-text">{p.children}</span>
+      <Show when={badge() != null && badge() !== ""}>
+        <span class="nav-link-badge" aria-label={`数量 ${badge()}`}>
+          {badge()}
+        </span>
+      </Show>
     </a>
   );
 }
@@ -268,7 +472,11 @@ function SideNav(p) {
     return findTeamFromUrlSegment(teamsList, tr.teamSegment);
   };
   const workspaceRootPath = () => buildWorkspacePath(p.currentWorkspace);
-  const projectsActive = () => p.innerPath === "/";
+  const projectsActive = () => p.innerPath === "/" || p.innerPath === "";
+  const myIssuesHref = () => buildWorkspacePath(p.currentWorkspace, "/my-issues");
+  const myIssuesActive = () => p.innerPath === "/my-issues";
+  const requirementPoolHref = () => buildWorkspacePath(p.currentWorkspace, "/requirement-pool");
+  const requirementPoolActive = () => p.innerPath === "/requirement-pool";
 
   onMount(() => {
     function docClick(ev) {
@@ -350,6 +558,17 @@ function SideNav(p) {
         <p class="group-title group-title-plain">Workspace</p>
         <NavLink icon={<SvgIconProjects />} href={workspaceRootPath()} active={projectsActive()}>
           Projects
+        </NavLink>
+        <NavLink icon={<SvgIconPool />} href={requirementPoolHref()} active={requirementPoolActive()}>
+          需求池
+        </NavLink>
+        <NavLink
+          icon={<SvgIconIssues />}
+          href={myIssuesHref()}
+          active={myIssuesActive()}
+          badge={typeof p.myPendingWorkTotal === "number" ? String(p.myPendingWorkTotal) : undefined}
+        >
+          My Issues
         </NavLink>
         <div class="teams-section">
           <div class="teams-section-header">
@@ -492,9 +711,12 @@ function SideNav(p) {
         </div>
       </nav>
       <footer class="side-nav-footer">
-        <button type="button" class="side-nav-logout-muted" onClick={p.onLogout}>
-          退出登录
-        </button>
+        <div class="side-nav-footer-row">
+          <ThemeSwitch />
+          <button type="button" class="side-nav-logout-muted" onClick={p.onLogout}>
+            退出登录
+          </button>
+        </div>
       </footer>
     </aside>
   );
@@ -511,21 +733,9 @@ function PageHeader(pp) {
   );
 }
 
-function ProjectHomePage() {
-  return (
-    <div class="main-area">
-      <section class="content page-wrap">
-        <PageHeader title="Projects" subtitle="工作区内的项目" />
-        <ProjectList />
-      </section>
-    </div>
-  );
-}
-
 function TeamCreatePage(pp) {
   const [name, setName] = createSignal("");
   const [identifier, setIdentifier] = createSignal("");
-  const [parentTeamId, setParentTeamId] = createSignal("");
   const [error, setError] = createSignal("");
   const [saving, setSaving] = createSignal(false);
 
@@ -545,8 +755,7 @@ function TeamCreatePage(pp) {
       const team = await apiPost("/api/teams", {
         name: name().trim(),
         workspaceId: pp.workspaceId,
-        identifier: identifier().trim().toUpperCase(),
-        parentTeamId: parentTeamId() || undefined
+        identifier: identifier().trim().toUpperCase()
       });
       pp.onTeamCreated(team);
       pp.onCreatedMessage(`Team "${team.name}" 创建成功`);
@@ -594,25 +803,8 @@ function TeamCreatePage(pp) {
               onInput={(event) => setIdentifier(event.target.value)}
             />
           </div>
-          <section class="team-hierarchy">
-            <h2>Team hierarchy</h2>
-            <p>Teams can be nested to reflect your team structure and to share workflows and settings</p>
-            <div class="team-field-row team-parent-row">
-              <label for="parent-team-select">Parent team</label>
-              <Sel
-                id="parent-team-select"
-                aria-label="Parent team"
-                value={parentTeamId()}
-                onChange={(value) => setParentTeamId(value)}
-                options={[
-                  { value: "", label: "No parent team" },
-                  ...pp.teams.map((team) => ({ value: team.id, label: team.name }))
-                ]}
-              />
-            </div>
-          </section>
           {error() ? <p class="error-text">{error()}</p> : null}
-          <Btn class="create-team-submit" variant="primary" htmlType="submit" loading={saving()} disabled={saving()}>
+          <Btn class="create-team-submit" variant="create" htmlType="submit" loading={saving()} disabled={saving()}>
             {saving() ? "Creating..." : "Create team"}
           </Btn>
         </form>
@@ -669,7 +861,7 @@ function WorkspaceCreateForm(pp) {
           placeholder={compact ? "Workspace 名称" : "例如：trex"}
           aria-label="Workspace name"
         />
-        <Btn variant="primary" htmlType="submit" loading={creating()} disabled={creating()}>
+        <Btn variant="create" htmlType="submit" loading={creating()} disabled={creating()}>
           {creating() ? "创建中..." : compact ? "创建" : "创建 Workspace"}
         </Btn>
       </form>
@@ -692,6 +884,10 @@ function WorkspaceSettingsPage(pp) {
   const cw = pp.currentWorkspace;
   const [name, setName] = createSignal(cw?.name || "");
   const [urlField, setUrlField] = createSignal(getWorkspaceUrl(cw));
+  const [gitlabEnabled, setGitlabEnabled] = createSignal(Boolean(cw?.gitlabIntegration?.enabled));
+  const [gitlabSecretDraft, setGitlabSecretDraft] = createSignal("");
+  const [gitlabDeliveries, setGitlabDeliveries] = createSignal([]);
+  const [gitlabDeliveriesLoading, setGitlabDeliveriesLoading] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
 
@@ -699,7 +895,77 @@ function WorkspaceSettingsPage(pp) {
     const w = pp.currentWorkspace;
     setName(w?.name || "");
     setUrlField(getWorkspaceUrl(w));
+    setGitlabEnabled(Boolean(w?.gitlabIntegration?.enabled));
+    setGitlabSecretDraft("");
   });
+
+  createEffect(() => {
+    const id = pp.currentWorkspace?.id;
+    if (!id) {
+      setGitlabDeliveries([]);
+      return;
+    }
+    let cancelled = false;
+    setGitlabDeliveriesLoading(true);
+    apiGet(`/api/workspaces/${encodeURIComponent(id)}/gitlab/deliveries?limit=30`)
+      .then((d) => {
+        if (!cancelled) {
+          setGitlabDeliveries(d.items || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGitlabDeliveries([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setGitlabDeliveriesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function gitlabWebhookFullUrl() {
+    const path = pp.currentWorkspace?.gitlabIntegration?.webhookPath;
+    if (!path) {
+      return "";
+    }
+    return `${ordoApiOriginForDisplay()}${path}`;
+  }
+
+  async function saveGitlabIntegration(patch) {
+    if (!pp.currentWorkspace?.id) {
+      return;
+    }
+    if (!name().trim()) {
+      setError("请先填写工作区名称再保存 GitLab 密钥");
+      return;
+    }
+    if (!slugifyWorkspaceUrl(urlField())) {
+      setError("请先填写合法的工作区网址路径");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await apiPatch(`/api/workspaces/${pp.currentWorkspace.id}`, {
+        name: name().trim(),
+        url: slugifyWorkspaceUrl(urlField()),
+        gitlabIntegration: patch
+      });
+      pp.onUpdated(updated);
+      if (updated?.gitlabSecretRevealOnce) {
+        setGitlabSecretDraft(String(updated.gitlabSecretRevealOnce));
+      }
+    } catch (err) {
+      setError(err?.status === 422 ? "GitLab 配置无效" : "保存 GitLab 设置失败");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -718,10 +984,18 @@ function WorkspaceSettingsPage(pp) {
     setSaving(true);
     setError("");
     try {
-      const updated = await apiPatch(`/api/workspaces/${pp.currentWorkspace.id}`, {
+      /** @type {Record<string, unknown>} */
+      const body = {
         name: name().trim(),
-        url: slugifyWorkspaceUrl(urlField())
-      });
+        url: slugifyWorkspaceUrl(urlField()),
+        gitlabIntegration: {
+          enabled: gitlabEnabled()
+        }
+      };
+      if (gitlabSecretDraft().trim()) {
+        body.gitlabIntegration.secret = gitlabSecretDraft().trim();
+      }
+      const updated = await apiPatch(`/api/workspaces/${pp.currentWorkspace.id}`, body);
       pp.onUpdated(updated);
     } catch (err) {
       if (err?.status === 409) {
@@ -769,11 +1043,97 @@ function WorkspaceSettingsPage(pp) {
             </label>
             {error() ? <p class="error-text workspace-settings-error">{error()}</p> : null}
             <div class="workspace-settings-actions">
-              <Btn variant="primary" htmlType="submit" loading={saving()}>
+              <Btn variant="save" htmlType="submit" loading={saving()}>
                 保存
               </Btn>
             </div>
           </form>
+        </div>
+
+        <div class="workspace-settings-card surface-card workspace-gitlab-card">
+          <h2 class="workspace-settings-card-title">GitLab 代码关联</h2>
+          <p class="workspace-settings-card-desc muted">
+            目标与 <strong>Linear 的 GitLab 联动</strong>一致：把 GitLab 上的<strong>推送、MR、评论</strong>同步到 Ordo，在<strong>任务详情 →
+            开发与合并</strong>中可视化展示链接与分支信息。下方 Webhook 只是<strong>数据入口</strong>，不是产品目的本身。可选：在团队 Workflow
+            中配置规则，在匹配到任务编号时<strong>自动推进状态</strong>（需该团队启用 GitLab Workflow）。
+          </p>
+          <label class="workspace-settings-field workspace-gitlab-toggle-row">
+            <span class="workspace-settings-label">启用工作区 Webhook（同步入口）</span>
+            <div class="workspace-settings-control">
+              <input
+                type="checkbox"
+                class="workspace-gitlab-checkbox"
+                checked={gitlabEnabled()}
+                onChange={(e) => setGitlabEnabled(e.currentTarget.checked)}
+                aria-label="启用工作区 GitLab Webhook"
+              />
+            </div>
+          </label>
+          <label class="workspace-settings-field">
+            <span class="workspace-settings-label">Webhook URL（复制到 GitLab）</span>
+            <div class="workspace-settings-control">
+              <Inp
+                class="workspace-settings-inp-grow workspace-gitlab-readonly-input"
+                readOnly
+                value={gitlabWebhookFullUrl()}
+                aria-label="GitLab Webhook URL"
+              />
+            </div>
+          </label>
+          <label class="workspace-settings-field">
+            <span class="workspace-settings-label">Secret Token</span>
+            <div class="workspace-settings-control workspace-gitlab-secret-row">
+              <Inp
+                class="workspace-settings-inp-grow"
+                type="password"
+                autoComplete="new-password"
+                value={gitlabSecretDraft()}
+                placeholder={pp.currentWorkspace?.gitlabIntegration?.hasSecret ? "已保存密钥，留空不修改；或填写新密钥" : "保存基本信息时一并写入"}
+                onInput={(e) => setGitlabSecretDraft(e.target.value)}
+                aria-label="GitLab webhook secret"
+              />
+              <Btn
+                type="button"
+                variant="text"
+                loading={saving()}
+                onClick={() => void saveGitlabIntegration({ generateSecret: true })}
+              >
+                随机生成
+              </Btn>
+            </div>
+          </label>
+          {pp.currentWorkspace?.gitlabIntegration?.hasSecret ? (
+            <p class="muted workspace-gitlab-hint">当前已保存密钥；随机生成或在上框填写新值后，需与 GitLab Webhook 中 Token 一致。</p>
+          ) : null}
+          <p class="muted workspace-gitlab-hint">
+            若 GitLab 无法通过浏览器域名访问 API（如本地开发），请在 <code class="workspace-gitlab-code">VITE_API_BASE_URL</code>{" "}
+            中配置可公网访问的 API 根地址，再复制上方完整 URL。
+          </p>
+          <div class="workspace-gitlab-deliveries">
+            <h3 class="workspace-gitlab-deliveries-title">最近同步记录（审计）</h3>
+            <Show when={gitlabDeliveriesLoading()}>
+              <p class="muted">加载中…</p>
+            </Show>
+            <Show when={!gitlabDeliveriesLoading() && gitlabDeliveries().length === 0}>
+              <p class="muted">
+                暂无记录。配置 Webhook 后，GitLab 会把事件推到 Ordo；含任务编号（如 COR-12）的提交/MR 会出现在对应任务的「开发与合并」区，本列表用于工作区维度排查。
+              </p>
+            </Show>
+            <Show when={!gitlabDeliveriesLoading() && gitlabDeliveries().length > 0}>
+              <ul class="workspace-gitlab-delivery-list">
+                <For each={gitlabDeliveries()}>
+                  {(row) => (
+                    <li class="workspace-gitlab-delivery-row">
+                      <span class="workspace-gitlab-delivery-summary">{row.summary}</span>
+                      <span class="workspace-gitlab-delivery-meta muted">
+                        {row.objectKind || "—"} · {row.createdAt ? new Date(row.createdAt).toLocaleString() : ""}
+                      </span>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </div>
         </div>
       </section>
     </div>
@@ -793,42 +1153,63 @@ export default function App() {
   const [workspaceSwitchOpen, setWorkspaceSwitchOpen] = createSignal(false);
   const [pendingWorkspaceId, setPendingWorkspaceId] = createSignal("");
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = createSignal(false);
+  /** 与 ProjectList 联动，刷新 ProjectsAside「工作区快照」项目数 */
+  const [projectsAsideVersion, setProjectsAsideVersion] = createSignal(0);
+  /** 待开始 + 进行中且指派给我；items 最多 5 条（创建最早） */
+  const [myPendingWork, setMyPendingWork] = createSignal({ total: null, items: [] });
+  const [profileName, setProfileName] = createSignal(null);
 
   createEffect(() => {
     pathname();
-    stashWorkspaceInviteTokenFromUrlIfPresent();
+    stashWorkspaceInviteFromUrlIfPresent();
   });
 
-  /** 避免登录态 createEffect 与 OAuth 完成回调重复兑付同一张邀请 */
-  let workspaceInviteFinalizeInFlight = false;
-
-  /**
-   * 用当前 localStorage 中的 access token 调用接受邀请，并切到对应 Workspace。
-   * @returns {Promise<boolean>} 是否处理过待兑付邀请（含失败，避免外层再 replace 到无关 URL）
-   */
-  async function runPendingWorkspaceInviteAfterAuth() {
+  /** 在用户于落地页确认后兑付邀请（不再在登录成功后自动调用 accept）。 */
+  async function finalizeWorkspaceInviteAccept(previewTeamId) {
     const token = readPendingWorkspaceInviteToken();
     if (!token) {
-      return false;
+      return;
     }
     try {
       const body = await apiGet(`/api/workspace-invites/accept?token=${encodeURIComponent(token)}`);
       clearPendingWorkspaceInviteToken();
+      clearPendingInviteTeamHint();
+
       const mines = await apiGet("/api/workspaces/mine");
       const items = mines?.items || [];
       setWorkspaces(items);
+
       const wid = body.workspaceId;
       if (wid) {
         setWorkspaceId(wid);
       }
-      setLoadingWorkspaces(false);
+
+      let teamItems = [];
+      try {
+        const teamsPayload = wid ? await apiGet(`/api/teams?workspaceId=${encodeURIComponent(wid)}`) : { items: [] };
+        teamItems = teamsPayload?.items || [];
+        setTeams(teamItems);
+      } catch {
+        setTeams([]);
+      }
+
+      const hintId = previewTeamId || body.contextTeamId || null;
+      const hinted = hintId ? teamItems.find((t) => t.id === hintId) : null;
       const wsObj = items.find((w) => w.id === wid);
-      const targetPath = wsObj ? buildWorkspacePath(wsObj) : "/";
+
+      let targetPath = wsObj ? buildWorkspacePath(wsObj) : "/";
+      if (hinted && wsObj) {
+        setExpandedTeamId(hinted.id);
+        const seg = teamSegmentForUrl(hinted);
+        targetPath = buildWorkspacePath(wsObj, `/workspace/teams/${seg}/issues`);
+      }
+
+      setLoadingWorkspaces(false);
       window.history.replaceState({}, "", targetPath);
       window.dispatchEvent(new PopStateEvent("popstate"));
-      return true;
     } catch (err) {
       clearPendingWorkspaceInviteToken();
+      clearPendingInviteTeamHint();
       setFlashMessage(
         err?.status === 410
           ? "邀请链接已过期"
@@ -849,7 +1230,7 @@ export default function App() {
       }
       window.history.replaceState({}, "", "/");
       window.dispatchEvent(new PopStateEvent("popstate"));
-      return true;
+      throw err;
     }
   }
 
@@ -860,7 +1241,6 @@ export default function App() {
       /* ignore */
     }
     localStorage.removeItem(LS_TOKEN_KEY);
-    localStorage.removeItem(LS_WORKSPACE_KEY);
     setLoggedIn(false);
     setWorkspaces([]);
     setWorkspaceId("");
@@ -884,7 +1264,12 @@ export default function App() {
         }
         pruneOrdoLocalStorage();
         url.searchParams.delete("accessToken");
-        window.history.replaceState({}, "", url.pathname + (url.search || ""));
+        if (readPendingWorkspaceInviteToken()) {
+          window.history.replaceState({}, "", acceptWorkspaceInvitePath());
+        } else {
+          window.history.replaceState({}, "", url.pathname + (url.search || ""));
+        }
+        window.dispatchEvent(new PopStateEvent("popstate"));
         setLoggedIn(true);
       })
       .catch(() => {
@@ -904,7 +1289,6 @@ export default function App() {
     apiPost("/api/auth/dingtalk/exchange-code", { authCode, redirectUri })
       .then((data) => {
         localStorage.setItem(LS_TOKEN_KEY, data.accessToken);
-        localStorage.removeItem(LS_WORKSPACE_KEY);
         try {
           sessionStorage.setItem(SESSION_BOOTSTRAP_KEY, "1");
         } catch {
@@ -913,8 +1297,11 @@ export default function App() {
         pruneOrdoLocalStorage();
         setAuthError("");
         setLoggedIn(true);
-        /** 待定邀请兑付前保留 URL，由 createEffect 调用 accept 后再 replace（无邀请则回首页） */
-        if (!readPendingWorkspaceInviteToken()) {
+        /** 有待接受邀请时落在邀请页，用户确认后再 accept */
+        if (readPendingWorkspaceInviteToken()) {
+          window.history.replaceState({}, "", acceptWorkspaceInvitePath());
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        } else {
           window.history.replaceState({}, "", "/");
         }
       })
@@ -922,6 +1309,10 @@ export default function App() {
         setAuthError("钉钉登录失败，请重试");
         setLoggedIn(false);
       });
+  });
+
+  onMount(() => {
+    stashWorkspaceInviteFromUrlIfPresent();
   });
 
   onMount(() => {
@@ -962,7 +1353,14 @@ export default function App() {
         }
       },
       (err) => {
-        console.error("[ordo] 静默注册失败（/User 不会写入）：", err?.message || err);
+        const msg = String(err?.message || err || "");
+        /** 与 Bearer 鉴权一致：过期/无效的钉钉 access_token 无法解析身份，应清本地态而非仅打错 */
+        if (err?.status === 400 && /Invalid DingTalk token/i.test(msg)) {
+          handleAuthExpired();
+          setAuthError("登录已过期，请重新登录");
+          return;
+        }
+        console.error("[ordo] 静默注册失败（/User 不会写入）：", msg || err);
       }
     );
   });
@@ -975,11 +1373,6 @@ export default function App() {
       setWorkspaceId("");
       return;
     }
-    /** 等待邀请兑付写入成员关系后再拉列表，否则与 accept 并发会短暂缺少新 Workspace */
-    if (readPendingWorkspaceInviteToken()) {
-      setLoadingWorkspaces(true);
-      return;
-    }
     let active = true;
     setLoadingWorkspaces(true);
     apiGet("/api/workspaces/mine")
@@ -989,9 +1382,19 @@ export default function App() {
         }
         const items = data?.items || [];
         setWorkspaces(items);
-        const existing = items.find((item) => item.id === localStorage.getItem(LS_WORKSPACE_KEY));
+        const storedWid = localStorage.getItem(LS_WORKSPACE_KEY);
+        const existing = items.find((item) => item.id === storedWid);
         const nextWorkspaceId = existing?.id || items[0]?.id || "";
         setWorkspaceId(nextWorkspaceId);
+        try {
+          if (nextWorkspaceId) {
+            localStorage.setItem(LS_WORKSPACE_KEY, nextWorkspaceId);
+          } else {
+            localStorage.removeItem(LS_WORKSPACE_KEY);
+          }
+        } catch {
+          /* ignore */
+        }
         setLoadingWorkspaces(false);
       })
       .catch((err) => {
@@ -1007,23 +1410,6 @@ export default function App() {
       });
     onCleanup(() => {
       active = false;
-    });
-  });
-
-  createEffect(() => {
-    if (!loggedIn()) {
-      return;
-    }
-    const token = readPendingWorkspaceInviteToken();
-    if (!token) {
-      return;
-    }
-    if (workspaceInviteFinalizeInFlight) {
-      return;
-    }
-    workspaceInviteFinalizeInFlight = true;
-    void runPendingWorkspaceInviteAfterAuth().finally(() => {
-      workspaceInviteFinalizeInFlight = false;
     });
   });
 
@@ -1054,6 +1440,54 @@ export default function App() {
       });
     onCleanup(() => {
       active = false;
+    });
+  });
+
+  createEffect(() => {
+    if (!loggedIn()) {
+      setProfileName(null);
+      return;
+    }
+    let alive = true;
+    apiGet("/api/profile")
+      .then((d) => {
+        if (!alive) {
+          return;
+        }
+        setProfileName(typeof d?.name === "string" && d.name.trim() ? d.name.trim() : null);
+      })
+      .catch(() => {
+        if (alive) {
+          setProfileName(null);
+        }
+      });
+    onCleanup(() => {
+      alive = false;
+    });
+  });
+
+  createEffect(() => {
+    if (!loggedIn() || !workspaceId()) {
+      setMyPendingWork({ total: null, items: [] });
+      return;
+    }
+    let alive = true;
+    apiGet("/api/issues/my-pending-work")
+      .then((d) => {
+        if (!alive) {
+          return;
+        }
+        const total = typeof d?.total === "number" ? d.total : null;
+        const items = Array.isArray(d?.items) ? d.items : [];
+        setMyPendingWork({ total, items });
+      })
+      .catch(() => {
+        if (alive) {
+          setMyPendingWork({ total: null, items: [] });
+        }
+      });
+    onCleanup(() => {
+      alive = false;
     });
   });
 
@@ -1117,6 +1551,9 @@ export default function App() {
       if (pn === acceptWorkspaceInvitePath() || pn.startsWith(`${acceptWorkspaceInvitePath()}?`)) {
         return;
       }
+      if (parseWorkspaceRelativeIssuePath(pn) || parseWorkspaceRelativeProjectPath(pn)) {
+        return;
+      }
       const target = buildWorkspacePath(cw);
       if (target !== pn) {
         navigateTo(target);
@@ -1161,20 +1598,34 @@ export default function App() {
     setTeams((prev) => [...prev, team]);
   }
 
-  function handleWorkspaceSwitch(nextWorkspaceId) {
+  async function handleWorkspaceSwitch(nextWorkspaceId) {
     if (!nextWorkspaceId) {
       return;
     }
-    setWorkspaceId(nextWorkspaceId);
     setWorkspaceSwitchOpen(false);
     setPendingWorkspaceId("");
-    const nextWorkspace = workspaces().find((item) => item.id === nextWorkspaceId);
-    const targetPath = buildWorkspacePath(nextWorkspace);
-    if (import.meta.env.MODE !== "test") {
-      window.location.assign(targetPath);
+    let nextWorkspace = workspaces().find((item) => item.id === nextWorkspaceId);
+    if (!nextWorkspace) {
+      try {
+        const mine = await apiGet("/api/workspaces/mine");
+        const items = mine?.items ?? [];
+        setWorkspaces(items);
+        nextWorkspace = items.find((item) => item.id === nextWorkspaceId);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!nextWorkspace) {
+      setFlashMessage("切换失败：未能加载所选 Workspace");
       return;
     }
-    navigateTo(targetPath);
+    setWorkspaceId(nextWorkspaceId);
+    try {
+      localStorage.setItem(LS_WORKSPACE_KEY, nextWorkspaceId);
+    } catch {
+      /* ignore */
+    }
+    navigateTo(buildWorkspacePath(nextWorkspace));
   }
 
   function handleWorkspaceUpdated(updatedWorkspace) {
@@ -1192,13 +1643,36 @@ export default function App() {
     onCleanup(() => window.clearTimeout(timer));
   });
 
+  /** 放在 App 内部，避免顶层子组件误引用不存在的 `workspaceId` 标识符 */
+  function ProjectHomePage(p = {}) {
+    const focusPid = () => String(p.focusProjectId || "").trim();
+    return (
+      <div class="main-area">
+        <section class="content page-wrap cycle-page-wrap">
+          <PageHeader title="Projects" subtitle="工作区内的项目" />
+          <div class="dash-grid">
+            <div class="dash-main">
+              <div class="surface-card dash-main-card">
+                <ProjectList
+                  workspaceId={workspaceId()}
+                  focusProjectId={focusPid()}
+                  onProjectsChanged={() => setProjectsAsideVersion((n) => n + 1)}
+                />
+              </div>
+            </div>
+            <ProjectsAside workspaceId={workspaceId()} projectsVersion={projectsAsideVersion()} />
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   function renderMain() {
     if (isCreateTeam()) {
       return (
         <TeamCreatePage
           workspaceId={workspaceId()}
           workspacePathPrefix={buildWorkspacePath(currentWorkspace())}
-          teams={teams()}
           onTeamCreated={handleTeamCreated}
           onCreatedMessage={(msg) => setFlashMessage(msg)}
         />
@@ -1207,6 +1681,41 @@ export default function App() {
 
     if (isWorkspaceSettings()) {
       return <WorkspaceSettingsPage currentWorkspace={currentWorkspace()} onUpdated={handleWorkspaceUpdated} />;
+    }
+
+    const shortcutIssueKey = parseWorkspaceRelativeIssuePath(innerPath());
+    if (shortcutIssueKey) {
+      return (
+        <IssueShortcutRoute
+          issueKey={shortcutIssueKey}
+          workspaceId={workspaceId()}
+          workspacePathPrefix={buildWorkspacePath(currentWorkspace())}
+          teams={teams()}
+          onIssueTeamResolved={(tid) => {
+            if (tid) {
+              setExpandedTeamId(tid);
+            }
+          }}
+          onIssueWorkspaceResolved={(wid) => {
+            if (!wid) {
+              return;
+            }
+            if (wid !== workspaceId()) {
+              setWorkspaceId(wid);
+            }
+            try {
+              localStorage.setItem(LS_WORKSPACE_KEY, wid);
+            } catch {
+              /* ignore */
+            }
+          }}
+        />
+      );
+    }
+
+    const shortcutProjectId = parseWorkspaceRelativeProjectPath(innerPath());
+    if (shortcutProjectId) {
+      return <ProjectHomePage focusProjectId={shortcutProjectId} />;
     }
 
     const tr = teamRoute();
@@ -1225,7 +1734,7 @@ export default function App() {
       if (tr.section === "issues") {
         return (
           <div class="main-area">
-            <section class="content page-wrap">
+            <section class="content page-wrap cycle-page-wrap issue-dash-page">
               <PageHeader title="Issues" subtitle={team.name} />
               <IssueList
                 teamId={team.id}
@@ -1289,33 +1798,92 @@ export default function App() {
       }
     }
 
+    if (innerPath() === "/requirement-pool") {
+      return (
+        <div class="main-area">
+          <section class="content page-wrap requirement-pool-page">
+            <PageHeader title="需求池" subtitle="PRD 与附件沉淀，确认后在团队下立项为项目迭代" />
+            <RequirementPoolPage
+              workspaceId={workspaceId()}
+              teams={teams()}
+              workspacePathPrefix={buildWorkspacePath(currentWorkspace())}
+              onFlash={(msg) => setFlashMessage(msg)}
+              onProjectsChanged={() => setProjectsAsideVersion((n) => n + 1)}
+              navigateTo={navigateTo}
+            />
+          </section>
+        </div>
+      );
+    }
+
+    if (innerPath() === "/my-issues") {
+      return (
+        <div class="main-area">
+          <section class="content page-wrap cycle-page-wrap issue-dash-page">
+            <PageHeader title="My Issues" subtitle="当前工作区分配给我的任务" />
+            <IssueList
+              mineIssues
+              workspaceId={workspaceId()}
+              workspacePathPrefix={buildWorkspacePath(currentWorkspace())}
+            />
+          </section>
+        </div>
+      );
+    }
+
     return <ProjectHomePage />;
   }
 
+  const inviteRouteActive = createMemo(() => {
+    const p = pathname();
+    const base = acceptWorkspaceInvitePath();
+    return p === base || p.startsWith(`${base}?`);
+  });
+
   return (
-    <Show
-      when={loggedIn()}
-      fallback={
-        <main class="auth-layout auth-layout--splash">
-          <div class="auth-splash-bg" aria-hidden />
-          <div class="auth-splash-inner">
-            <div class="splash-brand">
-              <span class="splash-logo-mark">O</span>
-              <div class="splash-brand-text">
-                <span class="splash-logo-word">Ordo</span>
-                <span class="splash-tagline">项目 · 团队 · 迭代</span>
+    <>
+      <Show when={inviteRouteActive()}>
+        <WorkspaceInviteLanding
+          themeSwitch={<ThemeSwitch />}
+          loggedIn={loggedIn}
+          authError={authError}
+          inviteToken={readPendingWorkspaceInviteToken}
+          teamHint={readPendingInviteTeamHint}
+          onAccept={async (pv) => finalizeWorkspaceInviteAccept(pv?.team?.id)}
+          onLeaveWithoutJoining={() => {
+            clearPendingWorkspaceInviteToken();
+            clearPendingInviteTeamHint();
+            navigateTo("/");
+          }}
+        />
+      </Show>
+
+      <Show when={!inviteRouteActive()}>
+        <Show
+          when={loggedIn()}
+          fallback={
+            <main class="auth-layout auth-layout--splash">
+              <div class="auth-splash-bg" aria-hidden />
+              <div class="auth-splash-inner">
+                <ThemeSwitch />
+                <div class="splash-brand">
+                  <span class="splash-logo-mark">O</span>
+                  <div class="splash-brand-text">
+                    <span class="splash-logo-word">Ordo</span>
+                    <span class="splash-tagline">项目 · 团队 · 迭代</span>
+                  </div>
+                </div>
+                <DingTalkLogin />
+                {authError() ? <p class="error-text auth-error-banner">{authError()}</p> : null}
               </div>
-            </div>
-            <DingTalkLogin />
-            {authError() ? <p class="error-text auth-error-banner">{authError()}</p> : null}
-          </div>
-        </main>
-      }
-    >
-      <Show when={loadingWorkspaces()}>
+            </main>
+          }
+        >
+          <Show when={loadingWorkspaces()}>
         <main class="auth-layout auth-layout--splash">
           <div class="auth-splash-bg" aria-hidden />
           <div class="auth-splash-inner auth-splash-inner--narrow">
+            <ThemeSwitch />
             <div class="splash-brand splash-brand--compact">
               <span class="splash-logo-mark">O</span>
               <span class="splash-logo-word">Ordo</span>
@@ -1336,6 +1904,7 @@ export default function App() {
         <main class="auth-layout auth-layout--splash">
           <div class="auth-splash-bg" aria-hidden />
           <div class="auth-splash-inner">
+            <ThemeSwitch />
             <div class="splash-brand">
               <span class="splash-logo-mark">O</span>
               <div class="splash-brand-text">
@@ -1371,8 +1940,18 @@ export default function App() {
             onOpenWorkspaceSettings={() =>
               navigateTo(buildWorkspacePath(currentWorkspace(), "/settings/workspaces"))
             }
+            myPendingWorkTotal={myPendingWork().total}
           />
-          {renderMain()}
+          <ShellTopBar
+            userDisplayName={profileName()}
+            workspacePathPrefix={buildWorkspacePath(currentWorkspace())}
+            myPendingWorkTotal={myPendingWork().total}
+            myPendingWorkItems={myPendingWork().items}
+            myIssuesPath={buildWorkspacePath(currentWorkspace(), "/my-issues")}
+            workspaceSettingsPath={buildWorkspacePath(currentWorkspace(), "/settings/workspaces")}
+            navigateTo={navigateTo}
+          />
+          <div class="app-shell-body">{renderMain()}</div>
           <Modal
             open={workspaceSwitchOpen()}
             title="选择 Workspace"
@@ -1382,7 +1961,7 @@ export default function App() {
                 <Btn variant="default" onClick={() => setWorkspaceSwitchOpen(false)}>
                   关闭
                 </Btn>
-                <Btn variant="primary" onClick={() => handleWorkspaceSwitch(pendingWorkspaceId())}>
+                <Btn variant="save" onClick={() => handleWorkspaceSwitch(pendingWorkspaceId())}>
                   确认切换
                 </Btn>
               </>
@@ -1417,6 +1996,8 @@ export default function App() {
           </Modal>
         </main>
       </Show>
-    </Show>
+        </Show>
+      </Show>
+    </>
   );
 }
